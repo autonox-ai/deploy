@@ -1,0 +1,16 @@
+{
+  "archives": {
+    "linux_amd64": {
+      "hashes": [
+        "h1:atjy/3de5SUiUdNr5YdegyyRf9sM8zuP4onb+Qlp6z4="
+      ],
+      "url": "terraform-provider-metabase_0.14.1_linux_amd64.zip"
+    },
+    "linux_arm64": {
+      "hashes": [
+        "h1:85/YmpP6CSNSv5dn225Y7EC292a7fUCx+4POihRzXB0="
+      ],
+      "url": "terraform-provider-metabase_0.14.1_linux_arm64.zip"
+    }
+  }
+}

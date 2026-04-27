@@ -1,0 +1,56 @@
+-- ============================================
+-- Metabase PostgreSQL Bootstrap
+--
+-- Variables:
+--   METABASE_DB
+--   METABASE_USER
+--   METABASE_PASSWORD
+--
+-- Example:
+--   export METABASE_DB=metabase
+--   export METABASE_USER=metabase_user
+--   export METABASE_PASSWORD=secret
+--   export PG_ADMIN_URL='postgresql://postgres:<admin-password>@localhost:5432/postgres'
+--
+--   envsubst < metabase/bootstrap/setup.sql.tmpl | psql "$PG_ADMIN_URL" -d postgres
+--
+-- Docker exec example:
+--   export METABASE_DB=metabase
+--   export METABASE_USER=metabase_user
+--   export METABASE_PASSWORD=secret
+--
+--   envsubst < metabase/bootstrap/setup.sql.tmpl \
+--     | docker exec -i nox-pg18 psql -U postgres -d postgres
+-- ============================================
+
+DO
+$$
+BEGIN
+   IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '${METABASE_USER}') THEN
+      EXECUTE format(
+         'CREATE ROLE %I LOGIN PASSWORD %L',
+         '${METABASE_USER}',
+         '${METABASE_PASSWORD}'
+      );
+   END IF;
+END
+$$;
+
+SELECT format(
+   'CREATE DATABASE %I OWNER %I',
+   '${METABASE_DB}',
+   '${METABASE_USER}'
+)
+WHERE NOT EXISTS (
+   SELECT 1
+   FROM pg_database
+   WHERE datname = '${METABASE_DB}'
+)
+\gexec
+
+\connect ${METABASE_DB}
+
+GRANT ALL PRIVILEGES ON DATABASE ${METABASE_DB} TO ${METABASE_USER};
+GRANT USAGE, CREATE ON SCHEMA public TO ${METABASE_USER};
+
+\echo 'Metabase bootstrap complete.'

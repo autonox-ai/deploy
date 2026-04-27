@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Pin the Metabase image version centrally.
+# Override in your customer overlay if you need a different release.
+images:
+  - name: metabase/metabase
+    newTag: v0.58.x

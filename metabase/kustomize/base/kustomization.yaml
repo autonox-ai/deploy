@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+commonLabels:
+  app.kubernetes.io/name: metabase
+  app.kubernetes.io/part-of: autonox
+
+resources:
+  - service.yaml
+  - deployment.yaml
+  # NOTE: The metabase-db Secret is NOT shipped by default. See README.md.

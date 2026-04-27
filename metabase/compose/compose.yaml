@@ -1,0 +1,25 @@
+name: autonox-metabase
+
+services:
+  metabase:
+    container_name: nox-metabase
+    image: ${METABASE_IMAGE:-metabase/metabase:v0.58.x}
+    restart: unless-stopped
+    environment:
+      MB_DB_TYPE: ${MB_DB_TYPE:-postgres}
+      MB_DB_DBNAME: ${MB_DB_DBNAME:-metabase}
+      MB_DB_PORT: ${MB_DB_PORT:-5432}
+      MB_DB_USER: ${MB_DB_USER:-metabase_user}
+      MB_DB_PASS: ${MB_DB_PASS:-secret}
+      MB_DB_HOST: ${MB_DB_HOST:-postgres}
+    ports:
+      - "${METABASE_PORT:-3000}:3000"
+    networks:
+      autonox-local:
+        aliases:
+          - metabase
+
+networks:
+  autonox-local:
+    external: true
+    name: ${METABASE_DOCKER_NETWORK:-autonox-local}

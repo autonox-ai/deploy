@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Customer-specific namespace goes here
+namespace: autonox
+
+resources:
+  - ../../overlays/openshift
+  - secret.metabase-db.example.yaml
+
+# Example: pin a specific Metabase image version (overrides the base component)
+# images:
+#   - name: metabase/metabase
+#     newTag: v0.51.6
+
+# Example: route Metabase via an OpenShift Route (or k8s Ingress)
+# patches:
+#   - target:
+#       kind: Service
+#       name: metabase
+#     patch: |-
+#       - op: replace
+#         path: /spec/type
+#         value: ClusterIP

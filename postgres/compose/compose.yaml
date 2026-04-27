@@ -1,0 +1,36 @@
+name: autonox-postgres
+
+services:
+  postgres:
+    container_name: nox-pg18
+    image: pgvector/pgvector:0.8.2-pg18-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in postgres/compose/.env}"
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      PGDATA: ${PGDATA:-/var/lib/postgresql/data/pgdata}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../bootstrap/setup.sql:/docker-entrypoint-initdb.d/10-autonox-setup.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      autonox-local:
+        aliases:
+          - postgres
+          - nox-pg18
+
+networks:
+  autonox-local:
+    name: autonox-local
+
+volumes:
+  pgdata:
+    name: autonox-pgdata

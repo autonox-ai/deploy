@@ -1,0 +1,31 @@
+# AutoNox image manifest
+#
+# Authoritative list of container images required to deploy AutoNox.
+# - Lines starting with `#` are comments.
+# - Each non-comment line is a fully-qualified image reference.
+# - Tags are immutable; never use :latest.
+#
+# Used by:
+#   - images/airgap/pull-and-save.sh  (mirror to .tar files for transport)
+#   - images/airgap/load.sh           (load .tar files on the target host)
+#
+# In a JFrog deployment, customers configure a Docker Remote Repository against
+# ghcr.io with include-pattern autonox-ai/** and rewrite the references below
+# to their virtual repo (see images/jfrog/integration-jfrog-artifactory.md).
+
+# --- AutoNox workload images (batch CLI dockers) ---
+# REPLACE the version pins with the release the customer is being upgraded to.
+ghcr.io/autonox-ai/collectors:sha-d7a1ca3-enterprise
+ghcr.io/autonox-ai/autonox-warehouse:sha-bacdab7
+ghcr.io/autonox-ai/reconciliation:sha-d7a1ca3-enterprise
+#ghcr.io/autonox-ai/crossid-rule-import:sha-ce5aced
+
+# --- Third-party images used by deploy/* assets ---
+# Keep these in sync with:
+#   - postgres/compose/compose.yaml
+#   - postgres/kustomize/components/images/kustomization.yaml
+#   - metabase/compose/compose.yaml
+#   - metabase/kustomize/components/images/kustomization.yaml
+pgvector/pgvector:0.8.2-pg18-trixie
+metabase/metabase:v0.58.x
+hashicorp/terraform:1.9

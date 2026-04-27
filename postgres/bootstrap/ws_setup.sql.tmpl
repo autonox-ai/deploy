@@ -1,0 +1,76 @@
+-- ============================================
+-- AutoNox Workspace Provisioning
+-- Dynamic per-workspace schema + grants
+-- Generated from ws_setup.sql.tmpl
+--
+-- Variables:
+--   WS_NAME  — workspace identifier, e.g. prod, dev, acme-corp
+--
+-- Generate with:
+--   WS_NAME=prod envsubst < postgres/bootstrap/ws_setup.sql.tmpl > ws_${WS_NAME}_setup.sql
+--
+-- Then hand the generated file to your DBA to apply:
+--   psql "$PG_ADMIN_URL" -d autonox -f ws_prod_setup.sql
+-- ============================================
+
+\connect autonox
+
+-- ------------------------------------------------
+-- SCHEMA
+-- ------------------------------------------------
+
+CREATE SCHEMA IF NOT EXISTS ws_${WS_NAME};
+ALTER SCHEMA ws_${WS_NAME} OWNER TO postgres;
+
+-- ------------------------------------------------
+-- SCHEMA PRIVILEGES
+-- ------------------------------------------------
+
+GRANT USAGE, CREATE ON SCHEMA ws_${WS_NAME} TO noxop;
+GRANT USAGE ON SCHEMA ws_${WS_NAME} TO noxreader;
+
+-- ------------------------------------------------
+-- EXISTING OBJECT PRIVILEGES
+-- (safe to run even if schema is empty)
+-- ------------------------------------------------
+
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ws_${WS_NAME} TO noxop;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA ws_${WS_NAME} TO noxop;
+GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA ws_${WS_NAME} TO noxop;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA ws_${WS_NAME} TO noxreader;
+
+-- ------------------------------------------------
+-- DEFAULT PRIVILEGES FOR FUTURE OBJECTS
+-- NOTE: applies to objects created by postgres (the migration runner)
+-- ------------------------------------------------
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA ws_${WS_NAME}
+   GRANT ALL ON TABLES TO noxop;
+ALTER DEFAULT PRIVILEGES IN SCHEMA ws_${WS_NAME}
+   GRANT ALL ON SEQUENCES TO noxop;
+ALTER DEFAULT PRIVILEGES IN SCHEMA ws_${WS_NAME}
+   GRANT ALL ON FUNCTIONS TO noxop;
+ALTER DEFAULT PRIVILEGES IN SCHEMA ws_${WS_NAME}
+   GRANT SELECT ON TABLES TO noxreader;
+
+-- ------------------------------------------------
+-- SEARCH PATH
+-- Ensures noxop resolves ws_${WS_NAME} first within this workspace.
+-- ------------------------------------------------
+
+ALTER ROLE noxop IN DATABASE autonox SET search_path = ws_${WS_NAME}, shared, public;
+
+-- ------------------------------------------------
+-- NOTES
+-- ------------------------------------------------
+-- 1. This script requires superuser/admin privileges (postgres role).
+-- 2. After applying, run the warehouse migrate for this workspace:
+--      docker run --rm ghcr.io/autonox/warehouse:VERSION migrate --workspace ${WS_NAME}
+-- 3. Then the reconciliation migrate:
+--      docker run --rm ghcr.io/autonox/reconciliation:VERSION migrate --workspace ${WS_NAME}
+-- 4. WS_NAME must be lowercase, alphanumeric + hyphens only.
+--    Hyphens are valid in PG schema names when quoted, but prefer underscores:
+--    ws_acme_corp not ws_acme-corp.
+
+\echo 'Workspace ws_${WS_NAME} provisioned.'

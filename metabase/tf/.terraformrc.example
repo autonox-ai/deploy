@@ -1,0 +1,17 @@
+# Air-gapped / offline Terraform CLI config.
+#
+# Copy to ~/.terraformrc (or pass via TF_CLI_CONFIG_FILE) so that
+# `terraform init` resolves the flovouin/metabase provider from the bundled
+# provider-mirror/ directory instead of reaching out to registry.terraform.io.
+#
+# Replace /ABS/PATH below with the absolute path to this file's directory.
+
+provider_installation {
+  filesystem_mirror {
+    path    = "/ABS/PATH/TO/deploy/metabase/tf/provider-mirror"
+    include = ["registry.terraform.io/flovouin/metabase"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/flovouin/metabase"]
+  }
+}

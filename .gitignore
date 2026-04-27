@@ -15,4 +15,14 @@
 *.secrets.yaml
 .env
 .env.*
+!.env.example
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+*.auto.tfvars
+metabase/tf/provider-mirror
+
+images/airgap/tars
