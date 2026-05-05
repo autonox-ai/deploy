@@ -645,28 +645,9 @@ resource "metabase_card" "entitlement_relationships" {
               {
                 "base-type"      = "type/Text"
                 "effective-type" = "type/Text"
-                "lib/uuid"       = "d33bbde0-28b8-43b0-8dfb-74bca57fd4a8"
-              },
-              metabase_table.entitlement_relations.fields["relation_id"]
-            ],
-            [
-              "field",
-              {
-                "base-type"      = "type/Text"
-                "effective-type" = "type/Text"
                 "lib/uuid"       = "d2f0b963-6612-475d-a7e3-6fe8745476a5"
               },
               metabase_table.entitlement_relations.fields["source"]
-            ],
-            [
-              "field",
-              {
-                "base-type"      = "type/Text"
-                "effective-type" = "type/Text"
-                "join-alias"     = "Parent Entitlement"
-                "lib/uuid"       = "05ca95e7-26f2-47ad-af4c-8310f72ea28c"
-              },
-              metabase_table.entitlements.fields["source"]
             ],
             [
               "field",
@@ -694,16 +675,6 @@ resource "metabase_card" "entitlement_relationships" {
                 "base-type"      = "type/Text"
                 "effective-type" = "type/Text"
                 "join-alias"     = "Child Entitlement"
-                "lib/uuid"       = "57e62118-220c-448d-97ee-c4b0c402dc5f"
-              },
-              metabase_table.entitlements.fields["source"]
-            ],
-            [
-              "field",
-              {
-                "base-type"      = "type/Text"
-                "effective-type" = "type/Text"
-                "join-alias"     = "Child Entitlement"
                 "lib/uuid"       = "ce80428d-9a43-42bc-aa31-dfd9a46269a4"
               },
               metabase_table.entitlements.fields["display_name"]
@@ -723,7 +694,7 @@ resource "metabase_card" "entitlement_relationships" {
             {
               "lib/type" = "mbql/join"
               alias      = "Parent Entitlement"
-              fields     = "all"
+              fields     = "none"
               conditions = [
                 [
                   "=",
@@ -764,7 +735,7 @@ resource "metabase_card" "entitlement_relationships" {
             {
               "lib/type" = "mbql/join"
               alias      = "Child Entitlement"
-              fields     = "all"
+              fields     = "none"
               conditions = [
                 [
                   "=",
