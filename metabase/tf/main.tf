@@ -1724,6 +1724,87 @@ resource "metabase_card" "common_entitlements" {
 }
 
 # ---------------------------
+# Card: Department Values (auxiliary — powers the Department dropdown in Who Works Here)
+# ---------------------------
+resource "metabase_card" "department_values" {
+  json = jsonencode({
+    name                   = "Department Values"
+    display                = "table"
+    description            = null
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = "SELECT DISTINCT department FROM bi_views.active_identities WHERE department IS NOT NULL ORDER BY 1"
+        }
+      ]
+    }
+  })
+}
+
+# Card: Identity Email Values (auxiliary — powers the Identity Emails dropdown in Common Entitlements)
+# ---------------------------
+resource "metabase_card" "identity_email_values" {
+  json = jsonencode({
+    name                   = "Identity Email Values"
+    display                = "table"
+    description            = null
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = "SELECT DISTINCT email FROM bi_views.active_identities WHERE email IS NOT NULL ORDER BY 1"
+        }
+      ]
+    }
+  })
+}
+
+# Card: Sensitivity Values (auxiliary — powers the Sensitivity dropdown in Entitlements Catalog)
+# ---------------------------
+resource "metabase_card" "sensitivity_values" {
+  json = jsonencode({
+    name                   = "Sensitivity Values"
+    display                = "table"
+    description            = null
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = "SELECT DISTINCT attributes->>'sensitivity' AS sensitivity FROM bi_views.entitlements WHERE attributes->>'sensitivity' IS NOT NULL ORDER BY 1"
+        }
+      ]
+    }
+  })
+}
+
 # Card: Entitlements Catalog
 # ---------------------------
 resource "metabase_card" "entitlements_catalog" {
@@ -1758,6 +1839,8 @@ resource "metabase_card" "entitlements_catalog" {
                 name         ILIKE '%' || {{search}} || '%'
                 OR display_name ILIKE '%' || {{search}} || '%'
               )]]
+              [[AND attributes->>'sensitivity' = {{sensitivity_filter}}]]
+              [[AND source = {{source_filter_ec}}]]
             ORDER BY source, kind, name
           SQL
           "template-tags" = {
@@ -1765,6 +1848,20 @@ resource "metabase_card" "entitlements_catalog" {
               id             = "33333333-3333-4333-8333-333333333333"
               name           = "search"
               "display-name" = "Search"
+              type           = "text"
+              required       = false
+            }
+            sensitivity_filter = {
+              id             = "44444444-4444-4444-8444-444444444449"
+              name           = "sensitivity_filter"
+              "display-name" = "Sensitivity"
+              type           = "text"
+              required       = false
+            }
+            source_filter_ec = {
+              id             = "55555555-5555-4555-8555-555555555559"
+              name           = "source_filter_ec"
+              "display-name" = "Source"
               type           = "text"
               required       = false
             }
@@ -1776,13 +1873,13 @@ resource "metabase_card" "entitlements_catalog" {
 }
 
 # ---------------------------
-# Card: Access Changes Between Dates
+# Card: Identity Info (auxiliary — header card for Access Changes dashboard)
 # ---------------------------
-resource "metabase_card" "access_changes_between_dates" {
+resource "metabase_card" "identity_info" {
   json = jsonencode({
-    name                   = "Access Changes Between Dates"
+    name                   = "Identity Info"
     display                = "table"
-    description            = "Entitlement changes (ADDED or REMOVED) between two dates for all identities. Filter optionally by identity email, source system, or change direction."
+    description            = null
     cache_ttl              = null
     collection_id          = null
     collection_position    = null
@@ -1797,9 +1894,187 @@ resource "metabase_card" "access_changes_between_dates" {
         {
           "lib/type" = "mbql.stage/native"
           native     = <<-SQL
+            SELECT display_name as Name, department, job_title as Title, manager_name as Manager
+            FROM bi_views.active_identities
+            WHERE email = {{identity_email}}
+            LIMIT 1
+          SQL
+          "template-tags" = {
+            identity_email = {
+              id             = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = true
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# Card: Access Changes Added Count (auxiliary — header metric for Access Changes dashboard)
+# ---------------------------
+resource "metabase_card" "access_changes_added_count" {
+  json = jsonencode({
+    name                = "Entitlements Added"
+    display             = "scalar"
+    description         = null
+    cache_ttl           = null
+    collection_id       = null
+    collection_position = null
+    query_type          = "native"
+    parameters          = []
+    parameter_mappings  = []
+    visualization_settings = {
+      "scalar.field" = "added"
+    }
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT COUNT(*) AS added
+            FROM audit.compare_access_between_dates(
+              CAST({{start_date}} AS DATE),
+              CAST({{end_date}} AS DATE) + INTERVAL '1 day' - INTERVAL '1 second'
+            )
+            WHERE change_type = 'ADDED'
+              [[AND email = {{identity_email}}]]
+          SQL
+          "template-tags" = {
+            start_date = {
+              id             = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+              name           = "start_date"
+              "display-name" = "Start Date"
+              type           = "text"
+              required       = true
+            }
+            end_date = {
+              id             = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+              name           = "end_date"
+              "display-name" = "End Date"
+              type           = "text"
+              required       = true
+            }
+            identity_email = {
+              id             = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = false
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# Card: Access Changes Removed Count (auxiliary — header metric for Access Changes dashboard)
+# ---------------------------
+resource "metabase_card" "access_changes_removed_count" {
+  json = jsonencode({
+    name                = "Entitlements Removed"
+    display             = "scalar"
+    description         = null
+    cache_ttl           = null
+    collection_id       = null
+    collection_position = null
+    query_type          = "native"
+    parameters          = []
+    parameter_mappings  = []
+    visualization_settings = {
+      "scalar.field" = "removed"
+    }
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT COUNT(*) AS removed
+            FROM audit.compare_access_between_dates(
+              CAST({{start_date}} AS DATE),
+              CAST({{end_date}} AS DATE) + INTERVAL '1 day' - INTERVAL '1 second'
+            )
+            WHERE change_type = 'REMOVED'
+              [[AND email = {{identity_email}}]]
+          SQL
+          "template-tags" = {
+            start_date = {
+              id             = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+              name           = "start_date"
+              "display-name" = "Start Date"
+              type           = "text"
+              required       = true
+            }
+            end_date = {
+              id             = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+              name           = "end_date"
+              "display-name" = "End Date"
+              type           = "text"
+              required       = true
+            }
+            identity_email = {
+              id             = "00000000-0000-4000-8000-000000000001"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = false
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# Card: Access Changes Between Dates
+# ---------------------------
+resource "metabase_card" "access_changes_between_dates" {
+  json = jsonencode({
+    name                = "Access Changes Between Dates"
+    display             = "table"
+    description         = "Entitlement changes (ADDED or REMOVED) between two dates for all identities. Filter optionally by identity email, source system, or change direction."
+    cache_ttl           = null
+    collection_id       = null
+    collection_position = null
+    query_type          = "native"
+    parameters          = []
+    parameter_mappings  = []
+    visualization_settings = {
+      "table.column_formatting" = [
+        {
+          columns       = ["change_type"]
+          type          = "single"
+          operator      = "="
+          value         = "ADDED"
+          color         = "#84BB4C"
+          highlight_row = false
+        },
+        {
+          columns       = ["change_type"]
+          type          = "single"
+          operator      = "="
+          value         = "REMOVED"
+          color         = "#EF8C8C"
+          highlight_row = false
+        }
+      ]
+    }
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
             SELECT
-              display_name,
-              email,
               change_type,
               app_name,
               entitlement_name,
@@ -1813,7 +2088,7 @@ resource "metabase_card" "access_changes_between_dates" {
               [[AND email       = {{identity_email}}]]
               [[AND via_source  = {{source_filter}}]]
               [[AND change_type = {{change_type}}]]
-            ORDER BY change_type, via_source, display_name, app_name, entitlement_name
+            ORDER BY change_type, via_source, app_name, entitlement_name
           SQL
           "template-tags" = {
             start_date = {
@@ -1874,11 +2149,48 @@ resource "metabase_dashboard" "main" {
       sectionId = "string"
     },
     {
+      id                 = "department_filter_dashboard"
+      name               = "Department"
+      slug               = "department"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "search"
+      values_source_type = "card"
+      values_source_config = {
+        card_id     = metabase_card.department_values.id
+        value_field = ["field", "department", { "base-type" = "type/Text" }]
+      }
+    },
+    {
       id        = "account_search_dashboard"
       name      = "Search Account"
       slug      = "account_search"
       type      = "string/contains"
       sectionId = "string"
+    },
+    {
+      id                 = "source_filter_ww_dashboard"
+      name               = "Account Source"
+      slug               = "account_source"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "static-list"
+      values_source_config = {
+        values = ["ad", "crossid", "github", "hr"]
+      }
+    },
+    {
+      id                 = "status_filter_ww_dashboard"
+      name               = "Account Status"
+      slug               = "account_status"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "static-list"
+      values_source_config = {
+        values = ["active", "inactive", "disabled"]
+      }
     }
   ])
 
@@ -1945,6 +2257,18 @@ resource "metabase_dashboard" "main" {
               { "base-type" = "type/Text" }
             ]
           ]
+        },
+        {
+          parameter_id = "department_filter_dashboard"
+          card_id      = metabase_card.identity_roster.id
+          target = [
+            "dimension",
+            [
+              "field",
+              metabase_table.identities.fields["department"],
+              { "base-type" = "type/Text" }
+            ]
+          ]
         }
       ]
       series                 = []
@@ -1965,6 +2289,30 @@ resource "metabase_dashboard" "main" {
             [
               "field",
               metabase_table.accounts.fields["username"],
+              { "base-type" = "type/Text" }
+            ]
+          ]
+        },
+        {
+          parameter_id = "source_filter_ww_dashboard"
+          card_id      = metabase_card.active_accounts_without_recent_login.id
+          target = [
+            "dimension",
+            [
+              "field",
+              metabase_table.accounts.fields["source"],
+              { "base-type" = "type/Text" }
+            ]
+          ]
+        },
+        {
+          parameter_id = "status_filter_ww_dashboard"
+          card_id      = metabase_card.active_accounts_without_recent_login.id
+          target = [
+            "dimension",
+            [
+              "field",
+              metabase_table.accounts.fields["status"],
               { "base-type" = "type/Text" }
             ]
           ]
@@ -2343,11 +2691,18 @@ resource "metabase_dashboard" "common_entitlements_dashboard" {
 
   parameters_json = jsonencode([
     {
-      id        = "identity_emails_dashboard"
-      name      = "Identity Emails"
-      slug      = "identity_emails"
-      type      = "string/="
-      sectionId = "string"
+      id                 = "identity_emails_dashboard"
+      name               = "Identity Emails"
+      slug               = "identity_emails"
+      type               = "string/="
+      sectionId          = "string"
+      isMultiSelect      = true
+      values_query_type  = "search"
+      values_source_type = "card"
+      values_source_config = {
+        card_id     = metabase_card.identity_email_values.id
+        value_field = ["field", "email", { "base-type" = "type/Text" }]
+      }
     },
     {
       id                 = "source_filter_ce_dashboard"
@@ -2402,6 +2757,31 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
       slug      = "search"
       type      = "string/="
       sectionId = "string"
+    },
+    {
+      id                 = "sensitivity_filter_ec_dashboard"
+      name               = "Sensitivity"
+      slug               = "sensitivity_filter"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "card"
+      values_source_config = {
+        card_id     = metabase_card.sensitivity_values.id
+        value_field = ["field", "sensitivity", { "base-type" = "type/Text" }]
+      }
+    },
+    {
+      id                 = "source_filter_ec_dashboard"
+      name               = "Source"
+      slug               = "source_filter_ec"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "static-list"
+      values_source_config = {
+        values = ["ad", "crossid", "github", "hr"]
+      }
     }
   ])
 
@@ -2417,6 +2797,16 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
           parameter_id = "entitlement_search_dashboard"
           card_id      = metabase_card.entitlements_catalog.id
           target       = ["variable", ["template-tag", "search"]]
+        },
+        {
+          parameter_id = "sensitivity_filter_ec_dashboard"
+          card_id      = metabase_card.entitlements_catalog.id
+          target       = ["variable", ["template-tag", "sensitivity_filter"]]
+        },
+        {
+          parameter_id = "source_filter_ec_dashboard"
+          card_id      = metabase_card.entitlements_catalog.id
+          target       = ["variable", ["template-tag", "source_filter_ec"]]
         }
       ]
       series                 = []
@@ -2430,7 +2820,7 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
 # ---------------------------
 resource "metabase_dashboard" "access_changes" {
   name        = "Access Changes Between Dates"
-  description = "Entitlement changes (ADDED / REMOVED) for all identities between two chosen dates. Filter optionally by identity email, source system, or change direction. See suggestion.md for guidance on interpreting results."
+  description = "Entitlement changes (ADDED / REMOVED) for a single identity between two chosen dates. The header row shows identity details and aggregate counts; the table lists each changed entitlement."
 
   parameters_json = jsonencode([
     {
@@ -2448,11 +2838,17 @@ resource "metabase_dashboard" "access_changes" {
       sectionId = "date"
     },
     {
-      id        = "identity_email_access"
-      name      = "Identity Email"
-      slug      = "identity_email"
-      type      = "string/="
-      sectionId = "string"
+      id                 = "identity_email_access"
+      name               = "Identity Email"
+      slug               = "identity_email"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "search"
+      values_source_type = "card"
+      values_source_config = {
+        card_id     = metabase_card.identity_email_values.id
+        value_field = ["field", "email", { "base-type" = "type/Text" }]
+      }
     },
     {
       id                 = "source_filter_access"
@@ -2482,8 +2878,76 @@ resource "metabase_dashboard" "access_changes" {
 
   cards_json = jsonencode([
     {
-      card_id = metabase_card.access_changes_between_dates.id
+      card_id = metabase_card.identity_info.id
       row     = 0
+      col     = 0
+      size_x  = 14
+      size_y  = 4
+      parameter_mappings = [
+        {
+          parameter_id = "identity_email_access"
+          card_id      = metabase_card.identity_info.id
+          target       = ["variable", ["template-tag", "identity_email"]]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
+      card_id = metabase_card.access_changes_added_count.id
+      row     = 0
+      col     = 14
+      size_x  = 5
+      size_y  = 4
+      parameter_mappings = [
+        {
+          parameter_id = "start_date_access"
+          card_id      = metabase_card.access_changes_added_count.id
+          target       = ["variable", ["template-tag", "start_date"]]
+        },
+        {
+          parameter_id = "end_date_access"
+          card_id      = metabase_card.access_changes_added_count.id
+          target       = ["variable", ["template-tag", "end_date"]]
+        },
+        {
+          parameter_id = "identity_email_access"
+          card_id      = metabase_card.access_changes_added_count.id
+          target       = ["variable", ["template-tag", "identity_email"]]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
+      card_id = metabase_card.access_changes_removed_count.id
+      row     = 0
+      col     = 19
+      size_x  = 5
+      size_y  = 4
+      parameter_mappings = [
+        {
+          parameter_id = "start_date_access"
+          card_id      = metabase_card.access_changes_removed_count.id
+          target       = ["variable", ["template-tag", "start_date"]]
+        },
+        {
+          parameter_id = "end_date_access"
+          card_id      = metabase_card.access_changes_removed_count.id
+          target       = ["variable", ["template-tag", "end_date"]]
+        },
+        {
+          parameter_id = "identity_email_access"
+          card_id      = metabase_card.access_changes_removed_count.id
+          target       = ["variable", ["template-tag", "identity_email"]]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
+      card_id = metabase_card.access_changes_between_dates.id
+      row     = 4
       col     = 0
       size_x  = 24
       size_y  = 10
