@@ -863,12 +863,7 @@ resource "metabase_card" "identity_summary_at_time" {
               org_unit_type
             FROM audit.get_identity_access_snapshot(
               {{identity_email}},
-              (
-                CASE
-                  WHEN LOWER(BTRIM({{snapshot_timestamp}})) IN ('today', 'thisday') THEN CURRENT_DATE
-                  ELSE CAST({{snapshot_timestamp}} AS DATE)
-                END
-              ) + INTERVAL '1 day' - INTERVAL '1 second'
+              LEAST({{snapshot_timestamp}}::date, CURRENT_DATE - 1) + INTERVAL '1 day' - INTERVAL '1 second'
             )
             LIMIT 1
           SQL
@@ -883,8 +878,8 @@ resource "metabase_card" "identity_summary_at_time" {
             snapshot_timestamp = {
               id             = "fe198fdf-e5d8-45e2-a151-3984d87556cd"
               name           = "snapshot_timestamp"
-              "display-name" = "Snapshot Timestamp"
-              type           = "text"
+              "display-name" = "Snapshot Date"
+              type           = "date"
               required       = true
             }
           }
@@ -925,12 +920,7 @@ resource "metabase_card" "identity_access_at_time" {
               access_granted_date
             FROM audit.get_identity_access_snapshot(
               {{identity_email}},
-              (
-                CASE
-                  WHEN LOWER(BTRIM({{snapshot_timestamp}})) IN ('today', 'thisday') THEN CURRENT_DATE
-                  ELSE CAST({{snapshot_timestamp}} AS DATE)
-                END
-              ) + INTERVAL '1 day' - INTERVAL '1 second'
+              LEAST({{snapshot_timestamp}}::date, CURRENT_DATE - 1) + INTERVAL '1 day' - INTERVAL '1 second'
             )
             ORDER BY
               COALESCE(app_name, ''),
@@ -949,8 +939,8 @@ resource "metabase_card" "identity_access_at_time" {
             snapshot_timestamp = {
               id             = "ce4bd2a6-8e17-4bb6-b50d-252dfd5bfa5c"
               name           = "snapshot_timestamp"
-              "display-name" = "Snapshot Timestamp"
-              type           = "text"
+              "display-name" = "Snapshot Date"
+              type           = "date"
               required       = true
             }
           }
@@ -999,12 +989,7 @@ resource "metabase_card" "account_access_at_time" {
             FROM audit.get_account_access_snapshot(
               {{account_source}},
               {{account_username}},
-              (
-                CASE
-                  WHEN LOWER(BTRIM({{snapshot_timestamp}})) IN ('today', 'thisday') THEN CURRENT_DATE
-                  ELSE CAST({{snapshot_timestamp}} AS DATE)
-                END
-              ) + INTERVAL '1 day' - INTERVAL '1 second'
+              LEAST({{snapshot_timestamp}}::date, CURRENT_DATE - 1) + INTERVAL '1 day' - INTERVAL '1 second'
             )
             ORDER BY
               COALESCE(app_name, ''),
@@ -1030,8 +1015,8 @@ resource "metabase_card" "account_access_at_time" {
             snapshot_timestamp = {
               id             = "e2b50f98-4098-4cf9-a245-7fed49956b51"
               name           = "snapshot_timestamp"
-              "display-name" = "Snapshot Timestamp"
-              type           = "text"
+              "display-name" = "Snapshot Date"
+              type           = "date"
               required       = true
             }
           }
@@ -2502,14 +2487,19 @@ resource "metabase_dashboard" "investigations" {
       slug      = "snapshot_timestamp"
       type      = "date/single"
       sectionId = "date"
-      default   = "today"
     },
     {
-      id        = "identity_email_dashboard"
-      name      = "Identity Email"
-      slug      = "identity_email"
-      type      = "string/="
-      sectionId = "string"
+      id                   = "identity_email_dashboard"
+      name                 = "Identity Email"
+      slug                 = "identity_email"
+      type                 = "string/="
+      sectionId            = "string"
+      values_query_type    = "search"
+      values_source_type   = "card"
+      values_source_config = {
+        card_id     = metabase_card.identity_email_values.id
+        value_field = ["field", "email", { "base-type" = "type/Text" }]
+      }
     },
     {
       id                 = "account_source_dashboard"
