@@ -1780,31 +1780,6 @@ resource "metabase_card" "identity_email_values" {
 
 # Card: Sensitivity Values (auxiliary — powers the Sensitivity dropdown in Entitlements Catalog)
 # ---------------------------
-resource "metabase_card" "sensitivity_values" {
-  json = jsonencode({
-    name                   = "Sensitivity Values"
-    display                = "table"
-    description            = null
-    cache_ttl              = null
-    collection_id          = null
-    collection_position    = null
-    query_type             = "native"
-    parameters             = []
-    parameter_mappings     = []
-    visualization_settings = {}
-    dataset_query = {
-      database   = metabase_database.postgres.id
-      "lib/type" = "mbql/query"
-      stages = [
-        {
-          "lib/type" = "mbql.stage/native"
-          native     = "SELECT DISTINCT attributes->>'sensitivity' AS sensitivity FROM bi_views.entitlements WHERE attributes->>'sensitivity' IS NOT NULL ORDER BY 1"
-        }
-      ]
-    }
-  })
-}
-
 # Card: Entitlements Catalog
 # ---------------------------
 resource "metabase_card" "entitlements_catalog" {
@@ -1831,15 +1806,16 @@ resource "metabase_card" "entitlements_catalog" {
               kind,
               name          AS entitlement_name,
               display_name,
-              attributes->>'description'  AS description,
-              attributes->>'sensitivity'  AS sensitivity
+              attributes->>'description'           AS description,
+              (attributes->'sensitivity')::int      AS sensitivity
             FROM bi_views.entitlements
             WHERE TRUE
               [[AND (
                 name         ILIKE '%' || {{search}} || '%'
                 OR display_name ILIKE '%' || {{search}} || '%'
               )]]
-              [[AND attributes->>'sensitivity' = {{sensitivity_filter}}]]
+              [[AND (attributes->'sensitivity')::int >= {{sensitivity_min}}]]
+              [[AND {{empty_sensitivity}} = 'yes' AND (attributes->'sensitivity') IS NULL]]
               [[AND source = {{source_filter_ec}}]]
             ORDER BY source, kind, name
           SQL
@@ -1851,10 +1827,17 @@ resource "metabase_card" "entitlements_catalog" {
               type           = "text"
               required       = false
             }
-            sensitivity_filter = {
+            sensitivity_min = {
               id             = "44444444-4444-4444-8444-444444444449"
-              name           = "sensitivity_filter"
-              "display-name" = "Sensitivity"
+              name           = "sensitivity_min"
+              "display-name" = "Min Sensitivity (1–4)"
+              type           = "number"
+              required       = false
+            }
+            empty_sensitivity = {
+              id             = "66666666-6666-4666-8666-666666666669"
+              name           = "empty_sensitivity"
+              "display-name" = "No Sensitivity Only"
               type           = "text"
               required       = false
             }
@@ -2759,16 +2742,22 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
       sectionId = "string"
     },
     {
-      id                 = "sensitivity_filter_ec_dashboard"
-      name               = "Sensitivity"
-      slug               = "sensitivity_filter"
-      type               = "string/="
-      sectionId          = "string"
-      values_query_type  = "list"
-      values_source_type = "card"
+      id        = "sensitivity_min_ec_dashboard"
+      name      = "Min Sensitivity"
+      slug      = "sensitivity_min"
+      type      = "number/="
+      sectionId = "number"
+    },
+    {
+      id                   = "empty_sensitivity_ec_dashboard"
+      name                 = "No Sensitivity"
+      slug                 = "empty_sensitivity"
+      type                 = "string/="
+      sectionId            = "string"
+      values_query_type    = "list"
+      values_source_type   = "static-list"
       values_source_config = {
-        card_id     = metabase_card.sensitivity_values.id
-        value_field = ["field", "sensitivity", { "base-type" = "type/Text" }]
+        values = ["yes"]
       }
     },
     {
@@ -2799,9 +2788,14 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
           target       = ["variable", ["template-tag", "search"]]
         },
         {
-          parameter_id = "sensitivity_filter_ec_dashboard"
+          parameter_id = "sensitivity_min_ec_dashboard"
           card_id      = metabase_card.entitlements_catalog.id
-          target       = ["variable", ["template-tag", "sensitivity_filter"]]
+          target       = ["variable", ["template-tag", "sensitivity_min"]]
+        },
+        {
+          parameter_id = "empty_sensitivity_ec_dashboard"
+          card_id      = metabase_card.entitlements_catalog.id
+          target       = ["variable", ["template-tag", "empty_sensitivity"]]
         },
         {
           parameter_id = "source_filter_ec_dashboard"
