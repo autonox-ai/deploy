@@ -1736,6 +1736,38 @@ resource "metabase_card" "department_values" {
   })
 }
 
+# Card: Source Values (auxiliary — powers all Source dropdowns across dashboards)
+# ---------------------------
+resource "metabase_card" "source_values" {
+  json = jsonencode({
+    name                   = "Source Values"
+    display                = "table"
+    description            = null
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT DISTINCT source FROM bi_views.accounts   WHERE source IS NOT NULL
+            UNION
+            SELECT DISTINCT source FROM bi_views.entitlements WHERE source IS NOT NULL
+            ORDER BY 1
+          SQL
+        }
+      ]
+    }
+  })
+}
+
 # Card: Identity Email Values (auxiliary — powers the Identity Emails dropdown in Common Entitlements)
 # ---------------------------
 resource "metabase_card" "identity_email_values" {
@@ -2143,9 +2175,10 @@ resource "metabase_dashboard" "main" {
       type               = "string/="
       sectionId          = "string"
       values_query_type  = "list"
-      values_source_type = "static-list"
+      values_source_type = "card"
       values_source_config = {
-        values = ["ad", "crossid", "github", "hr"]
+        card_id     = metabase_card.source_values.id
+        value_field = ["field", "source", { "base-type" = "type/Text" }]
       }
     },
     {
@@ -2508,9 +2541,10 @@ resource "metabase_dashboard" "investigations" {
       type               = "string/="
       sectionId          = "string"
       values_query_type  = "list"
-      values_source_type = "static-list"
+      values_source_type = "card"
       values_source_config = {
-        values = ["ad", "crossid", "github", "hr"]
+        card_id     = metabase_card.source_values.id
+        value_field = ["field", "source", { "base-type" = "type/Text" }]
       }
     },
     {
@@ -2684,9 +2718,10 @@ resource "metabase_dashboard" "common_entitlements_dashboard" {
       type               = "string/="
       sectionId          = "string"
       values_query_type  = "list"
-      values_source_type = "static-list"
+      values_source_type = "card"
       values_source_config = {
-        values = ["ad", "crossid", "github", "hr"]
+        card_id     = metabase_card.source_values.id
+        value_field = ["field", "source", { "base-type" = "type/Text" }]
       }
     }
   ])
@@ -2757,9 +2792,10 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
       type               = "string/="
       sectionId          = "string"
       values_query_type  = "list"
-      values_source_type = "static-list"
+      values_source_type = "card"
       values_source_config = {
-        values = ["ad", "crossid", "github", "hr"]
+        card_id     = metabase_card.source_values.id
+        value_field = ["field", "source", { "base-type" = "type/Text" }]
       }
     }
   ])
@@ -2841,9 +2877,10 @@ resource "metabase_dashboard" "access_changes" {
       type               = "string/="
       sectionId          = "string"
       values_query_type  = "list"
-      values_source_type = "static-list"
+      values_source_type = "card"
       values_source_config = {
-        values = ["ad", "crossid", "github", "hr"]
+        card_id     = metabase_card.source_values.id
+        value_field = ["field", "source", { "base-type" = "type/Text" }]
       }
     },
     {
