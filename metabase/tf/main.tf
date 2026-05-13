@@ -1814,14 +1814,14 @@ resource "metabase_card" "entitlements_catalog" {
               name          AS entitlement_name,
               display_name,
               attributes->>'description'           AS description,
-              (attributes->'sensitivity')::int      AS sensitivity
+              CASE WHEN attributes->>'sensitivity' ~ '^\d+$' THEN (attributes->>'sensitivity')::int END AS sensitivity
             FROM bi_views.entitlements
             WHERE TRUE
               [[AND (
                 name         ILIKE '%' || {{search}} || '%'
                 OR display_name ILIKE '%' || {{search}} || '%'
               )]]
-              [[AND (attributes->'sensitivity')::int >= {{sensitivity_min}}]]
+              [[AND CASE WHEN attributes->>'sensitivity' ~ '^\d+$' THEN (attributes->>'sensitivity')::int END >= {{sensitivity_min}}]]
               [[AND {{empty_sensitivity}} = 'yes' AND (attributes->'sensitivity') IS NULL]]
               [[AND source = {{source_filter_ec}}]]
             ORDER BY source, kind, name
