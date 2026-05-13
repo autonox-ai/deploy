@@ -2134,6 +2134,80 @@ resource "metabase_card" "access_changes_between_dates" {
 }
 
 # ---------------------------
+# Card: Global Search POC
+# ---------------------------
+resource "metabase_card" "global_search_poc" {
+  json = jsonencode({
+    name                   = "Global Search POC"
+    display                = "table"
+    description            = "BM25 global IAM search backed by search_poc.current_documents, with trigram typo fallback and Hebrew fixture coverage."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = file("${path.module}/../poc/search/sql/metabase_global_search.sql")
+          "template-tags" = {
+            search_query = {
+              id             = "33333333-3333-4333-8333-333333333333"
+              name           = "search_query"
+              "display-name" = "Search Query"
+              type           = "text"
+              required       = true
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
+# Dashboard: Search POC
+# ---------------------------
+resource "metabase_dashboard" "search_poc" {
+  name        = "Search POC"
+  description = "Proof-of-concept global IAM search using pg_textsearch BM25 plus pg_trgm typo fallback. Configure the Metabase data source to the PG18 POC database."
+
+  parameters_json = jsonencode([
+    {
+      id        = "search_query_dashboard"
+      name      = "Search Query"
+      slug      = "search_query"
+      type      = "string/="
+      sectionId = "string"
+    }
+  ])
+
+  cards_json = jsonencode([
+    {
+      card_id = metabase_card.global_search_poc.id
+      row     = 0
+      col     = 0
+      size_x  = 24
+      size_y  = 12
+      parameter_mappings = [
+        {
+          parameter_id = "search_query_dashboard"
+          card_id      = metabase_card.global_search_poc.id
+          target       = ["variable", ["template-tag", "search_query"]]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    }
+  ])
+}
+
+# ---------------------------
 # Dashboard
 # ---------------------------
 resource "metabase_dashboard" "main" {
@@ -2522,13 +2596,13 @@ resource "metabase_dashboard" "investigations" {
       sectionId = "date"
     },
     {
-      id                   = "identity_email_dashboard"
-      name                 = "Identity Email"
-      slug                 = "identity_email"
-      type                 = "string/="
-      sectionId            = "string"
-      values_query_type    = "search"
-      values_source_type   = "card"
+      id                 = "identity_email_dashboard"
+      name               = "Identity Email"
+      slug               = "identity_email"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "search"
+      values_source_type = "card"
       values_source_config = {
         card_id     = metabase_card.identity_email_values.id
         value_field = ["field", "email", { "base-type" = "type/Text" }]
@@ -2774,13 +2848,13 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
       sectionId = "number"
     },
     {
-      id                   = "empty_sensitivity_ec_dashboard"
-      name                 = "No Sensitivity"
-      slug                 = "empty_sensitivity"
-      type                 = "string/="
-      sectionId            = "string"
-      values_query_type    = "list"
-      values_source_type   = "static-list"
+      id                 = "empty_sensitivity_ec_dashboard"
+      name               = "No Sensitivity"
+      slug               = "empty_sensitivity"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "static-list"
       values_source_config = {
         values = ["yes"]
       }

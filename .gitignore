@@ -22,6 +22,7 @@
 *.tfstate
 *.tfstate.*
 terraform.tfvars
+terraform.tfvars.*
 *.auto.tfvars
 metabase/tf/provider-mirror
 
