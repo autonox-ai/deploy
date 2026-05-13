@@ -1103,16 +1103,6 @@ resource "metabase_card" "account_entitlement_relationships" {
               {
                 "base-type"      = "type/Text"
                 "effective-type" = "type/Text"
-                "join-alias"     = "Accounts"
-                "lib/uuid"       = "0cfc87ca-b69d-43c2-a8aa-643ff88a0e71"
-              },
-              metabase_table.accounts.fields["username"]
-            ],
-            [
-              "field",
-              {
-                "base-type"      = "type/Text"
-                "effective-type" = "type/Text"
                 "lib/uuid"       = "bfc6252c-d4cf-46cc-b38d-03fc0f11150a"
               },
               metabase_table.identity_entitlements.fields["display_name"]
