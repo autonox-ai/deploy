@@ -1106,7 +1106,7 @@ resource "metabase_card" "account_entitlement_relationships" {
                 "join-alias"     = "Accounts"
                 "lib/uuid"       = "0cfc87ca-b69d-43c2-a8aa-643ff88a0e71"
               },
-              metabase_table.accounts.fields["attributes → display_name"]
+              metabase_table.accounts.fields["username"]
             ],
             [
               "field",
@@ -2522,13 +2522,13 @@ resource "metabase_dashboard" "investigations" {
       sectionId = "date"
     },
     {
-      id                   = "identity_email_dashboard"
-      name                 = "Identity Email"
-      slug                 = "identity_email"
-      type                 = "string/="
-      sectionId            = "string"
-      values_query_type    = "search"
-      values_source_type   = "card"
+      id                 = "identity_email_dashboard"
+      name               = "Identity Email"
+      slug               = "identity_email"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "search"
+      values_source_type = "card"
       values_source_config = {
         card_id     = metabase_card.identity_email_values.id
         value_field = ["field", "email", { "base-type" = "type/Text" }]
@@ -2774,13 +2774,13 @@ resource "metabase_dashboard" "entitlements_catalog_dashboard" {
       sectionId = "number"
     },
     {
-      id                   = "empty_sensitivity_ec_dashboard"
-      name                 = "No Sensitivity"
-      slug                 = "empty_sensitivity"
-      type                 = "string/="
-      sectionId            = "string"
-      values_query_type    = "list"
-      values_source_type   = "static-list"
+      id                 = "empty_sensitivity_ec_dashboard"
+      name               = "No Sensitivity"
+      slug               = "empty_sensitivity"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "static-list"
       values_source_config = {
         values = ["yes"]
       }
