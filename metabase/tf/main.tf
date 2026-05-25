@@ -1651,28 +1651,40 @@ resource "metabase_card" "common_entitlements" {
               WHERE email IN ({{identity_emails}})
             ),
             email_count AS (SELECT COUNT(*) AS n FROM emails),
+            ent_desc AS (
+              SELECT entitlement_id, MAX(description) AS description
+              FROM bi_views.entitlements
+              GROUP BY entitlement_id
+            ),
             all_access AS (
               SELECT
                 e.email      AS identity_email,
+                snap.entitlement_id,
+                snap.source_key,
                 snap.entitlement_name,
                 snap.entitlement_type,
                 snap.app_name,
-                snap.via_source
+                snap.via_source,
+                ent.description
               FROM emails e
               CROSS JOIN LATERAL audit.get_identity_access_snapshot(
                 e.email,
                 CURRENT_DATE + INTERVAL '1 day' - INTERVAL '1 second'
               ) snap
+              LEFT JOIN ent_desc ent
+                ON ent.entitlement_id = snap.entitlement_id
             )
             SELECT
               app_name,
               entitlement_name,
+              source_key,
               entitlement_type,
-              via_source AS source
+              via_source AS source,
+              description
             FROM all_access
             WHERE TRUE
               [[AND via_source = {{source_filter}}]]
-            GROUP BY app_name, entitlement_name, entitlement_type, via_source
+            GROUP BY entitlement_id, app_name, entitlement_name, source_key, entitlement_type, via_source, description
             HAVING COUNT(DISTINCT identity_email) = (SELECT n FROM email_count)
             ORDER BY app_name, entitlement_name, via_source
           SQL
@@ -1726,31 +1738,43 @@ resource "metabase_card" "differing_entitlements" {
               WHERE email IN ({{identity_emails}})
             ),
             email_count AS (SELECT COUNT(*) AS n FROM emails),
+            ent_desc AS (
+              SELECT entitlement_id, MAX(description) AS description
+              FROM bi_views.entitlements
+              GROUP BY entitlement_id
+            ),
             all_access AS (
               SELECT
                 e.email      AS identity_email,
+                snap.entitlement_id,
+                snap.source_key,
                 snap.entitlement_name,
                 snap.entitlement_type,
                 snap.app_name,
-                snap.via_source
+                snap.via_source,
+                ent.description
               FROM emails e
               CROSS JOIN LATERAL audit.get_identity_access_snapshot(
                 e.email,
                 CURRENT_DATE + INTERVAL '1 day' - INTERVAL '1 second'
               ) snap
+              LEFT JOIN ent_desc ent
+                ON ent.entitlement_id = snap.entitlement_id
             )
             SELECT
               app_name,
               entitlement_name,
+              source_key,
               entitlement_type,
               via_source AS source,
+              description,
               COUNT(DISTINCT identity_email) AS held_by_count,
               (SELECT n FROM email_count) AS total_identities,
               STRING_AGG(DISTINCT identity_email, ', ' ORDER BY identity_email) AS held_by
             FROM all_access
             WHERE TRUE
               [[AND via_source = {{source_filter}}]]
-            GROUP BY app_name, entitlement_name, entitlement_type, via_source
+            GROUP BY entitlement_id, app_name, entitlement_name, source_key, entitlement_type, via_source, description
             HAVING COUNT(DISTINCT identity_email) < (SELECT n FROM email_count)
             ORDER BY app_name, entitlement_name, via_source
           SQL
