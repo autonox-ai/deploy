@@ -922,6 +922,7 @@ resource "metabase_card" "identity_access_at_time" {
               {{identity_email}},
               LEAST({{snapshot_timestamp}}::date, CURRENT_DATE - 1) + INTERVAL '1 day' - INTERVAL '1 second'
             )
+            [[WHERE via_source = {{account_source}}]]
             ORDER BY
               COALESCE(app_name, ''),
               entitlement_name,
@@ -942,6 +943,13 @@ resource "metabase_card" "identity_access_at_time" {
               "display-name" = "Snapshot Date"
               type           = "date"
               required       = true
+            }
+            account_source = {
+              id             = "f93e4f19-aa28-405c-b51d-d3ededf17a64"
+              name           = "account_source"
+              "display-name" = "Account Source"
+              type           = "text"
+              required       = false
             }
           }
         }
