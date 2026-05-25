@@ -1646,9 +1646,9 @@ resource "metabase_card" "common_entitlements" {
           "lib/type" = "mbql.stage/native"
           native     = <<-SQL
             WITH emails AS (
-              SELECT TRIM(unnested) AS email
-              FROM UNNEST(STRING_TO_ARRAY({{identity_emails}}, ',')) AS unnested
-              WHERE TRIM(unnested) <> ''
+              SELECT DISTINCT email
+              FROM bi_views.active_identities
+              WHERE email IN ({{identity_emails}})
             ),
             email_count AS (SELECT COUNT(*) AS n FROM emails),
             all_access AS (
@@ -1686,6 +1686,84 @@ resource "metabase_card" "common_entitlements" {
             }
             source_filter = {
               id             = "22222222-2222-4222-8222-222222222222"
+              name           = "source_filter"
+              "display-name" = "Source"
+              type           = "text"
+              required       = false
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
+# Card: Differing Entitlements Across Identities
+# ---------------------------
+resource "metabase_card" "differing_entitlements" {
+  json = jsonencode({
+    name                   = "Differing Entitlements Across Identities"
+    display                = "table"
+    description            = "Entitlements held by some but not all of the supplied identities, as of today. Shows how many of the selected identities hold each entitlement and which ones, so you can see where access diverges. Each row is broken out per source so the Source filter narrows results to a single source system."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            WITH emails AS (
+              SELECT DISTINCT email
+              FROM bi_views.active_identities
+              WHERE email IN ({{identity_emails}})
+            ),
+            email_count AS (SELECT COUNT(*) AS n FROM emails),
+            all_access AS (
+              SELECT
+                e.email      AS identity_email,
+                snap.entitlement_name,
+                snap.entitlement_type,
+                snap.app_name,
+                snap.via_source
+              FROM emails e
+              CROSS JOIN LATERAL audit.get_identity_access_snapshot(
+                e.email,
+                CURRENT_DATE + INTERVAL '1 day' - INTERVAL '1 second'
+              ) snap
+            )
+            SELECT
+              app_name,
+              entitlement_name,
+              entitlement_type,
+              via_source AS source,
+              COUNT(DISTINCT identity_email) AS held_by_count,
+              (SELECT n FROM email_count) AS total_identities,
+              STRING_AGG(DISTINCT identity_email, ', ' ORDER BY identity_email) AS held_by
+            FROM all_access
+            WHERE TRUE
+              [[AND via_source = {{source_filter}}]]
+            GROUP BY app_name, entitlement_name, entitlement_type, via_source
+            HAVING COUNT(DISTINCT identity_email) < (SELECT n FROM email_count)
+            ORDER BY app_name, entitlement_name, via_source
+          SQL
+          "template-tags" = {
+            identity_emails = {
+              id             = "33333333-3333-4333-8333-333333333333"
+              name           = "identity_emails"
+              "display-name" = "Identity Emails (comma-separated)"
+              type           = "text"
+              required       = true
+            }
+            source_filter = {
+              id             = "44444444-4444-4444-8444-444444444444"
               name           = "source_filter"
               "display-name" = "Source"
               type           = "text"
@@ -2680,11 +2758,11 @@ resource "metabase_dashboard" "investigations" {
 }
 
 # ---------------------------
-# Dashboard: Common Entitlements
+# Dashboard: Entitlement Comparison
 # ---------------------------
 resource "metabase_dashboard" "common_entitlements_dashboard" {
-  name        = "Common Entitlements"
-  description = "Entitlements shared by a group of identities. Enter a comma-separated list of emails to see all entitlements every listed identity holds today. Use the Source filter to drill into a specific source system."
+  name        = "Entitlement Comparison"
+  description = "Compare access across a group of identities. Enter a comma-separated list of emails to see both the entitlements every listed identity shares and the entitlements where they diverge. Use the Source filter to drill into a specific source system."
 
   parameters_json = jsonencode([
     {
@@ -2718,11 +2796,31 @@ resource "metabase_dashboard" "common_entitlements_dashboard" {
 
   cards_json = jsonencode([
     {
+      card_id            = null
+      row                = 0
+      col                = 0
+      size_x             = 24
+      size_y             = 1
+      series             = []
+      parameter_mappings = []
+      visualization_settings = {
+        virtual_card = {
+          name                   = null
+          display                = "text"
+          visualization_settings = {}
+          dataset_query          = {}
+          archived               = false
+        }
+        text                  = "### Common Entitlements — shared by every selected identity"
+        "text.align_vertical" = "middle"
+      }
+    },
+    {
       card_id = metabase_card.common_entitlements.id
-      row     = 0
+      row     = 1
       col     = 0
       size_x  = 24
-      size_y  = 10
+      size_y  = 9
       parameter_mappings = [
         {
           parameter_id = "identity_emails_dashboard"
@@ -2732,6 +2830,47 @@ resource "metabase_dashboard" "common_entitlements_dashboard" {
         {
           parameter_id = "source_filter_ce_dashboard"
           card_id      = metabase_card.common_entitlements.id
+          target       = ["variable", ["template-tag", "source_filter"]]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
+      card_id            = null
+      row                = 10
+      col                = 0
+      size_x             = 24
+      size_y             = 1
+      series             = []
+      parameter_mappings = []
+      visualization_settings = {
+        virtual_card = {
+          name                   = null
+          display                = "text"
+          visualization_settings = {}
+          dataset_query          = {}
+          archived               = false
+        }
+        text                  = "### Differing Entitlements — held by some but not all selected identities"
+        "text.align_vertical" = "middle"
+      }
+    },
+    {
+      card_id = metabase_card.differing_entitlements.id
+      row     = 11
+      col     = 0
+      size_x  = 24
+      size_y  = 9
+      parameter_mappings = [
+        {
+          parameter_id = "identity_emails_dashboard"
+          card_id      = metabase_card.differing_entitlements.id
+          target       = ["variable", ["template-tag", "identity_emails"]]
+        },
+        {
+          parameter_id = "source_filter_ce_dashboard"
+          card_id      = metabase_card.differing_entitlements.id
           target       = ["variable", ["template-tag", "source_filter"]]
         }
       ]

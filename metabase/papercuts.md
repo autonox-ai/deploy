@@ -10,7 +10,7 @@
 
 2. identity emails list with search in `common_entitlements`
    - changed `Identity Emails` dashboard parameter to `isMultiSelect = true` with `values_source_type = "field"` backed by `identities.email`
-   - Metabase joins multi-select picks with commas, which feeds directly into the existing `STRING_TO_ARRAY({{identity_emails}}, ',')` SQL
+   - Metabase substitutes a multi-select on a basic *text* variable as a quoted SQL value list (`'a','b','c'`), NOT a plain comma string. `STRING_TO_ARRAY({{identity_emails}}, ',')` therefore broke at 3+ selections (turned into a 4-arg call). Fixed by matching with `email IN ({{identity_emails}})` against `bi_views.active_identities`.
 
 3. entitlements catalog: sensitivity filter + source drill-down
    - new auxiliary card `sensitivity_values` queries `DISTINCT attributes->>'sensitivity'` and powers the dropdown
@@ -22,6 +22,8 @@
    - new card `common_entitlements` + dashboard "Common Entitlements"
    - native SQL uses `CROSS JOIN LATERAL audit.get_identity_access_snapshot` for each email in a comma-separated input; HAVING filters to entitlements shared by every identity
    - 1.1 source level drill down: rows broken out by `via_source`; optional Source filter parameter on the dashboard
+   - 1.2 inverse view: new card `differing_entitlements` — `HAVING COUNT(DISTINCT identity_email) < n` shows entitlements NOT held by everyone, with `held_by_count` / `total_identities` / `held_by` columns to see where access diverges
+   - 1.3 both cards live on one dashboard (renamed "Entitlement Comparison"): Common stacked above Differing, each with a text heading card, both wired to the same `Identity Emails` + `Source` filters
 
 2. add search to tables
    - added `parameters_json` with `string/contains` parameters to the "Who Works Here" dashboard
