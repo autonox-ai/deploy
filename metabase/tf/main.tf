@@ -1011,14 +1011,16 @@ resource "metabase_card" "account_access_at_time" {
               name           = "account_source"
               "display-name" = "Account Source"
               type           = "text"
-              required       = true
+              required       = false
+              default        = ""
             }
             account_username = {
               id             = "0283e122-a447-440e-a4c6-7c9ae76f3fc1"
               name           = "account_username"
               "display-name" = "Account Username"
               type           = "text"
-              required       = true
+              required       = false
+              default        = ""
             }
             snapshot_timestamp = {
               id             = "e2b50f98-4098-4cf9-a245-7fed49956b51"
@@ -2648,6 +2650,8 @@ resource "metabase_dashboard" "investigations" {
       }
     },
     {
+      # Set by clicking a Via Account cell in the Identity Entitlements table (point-in-time
+      # correct). No value source: it is not a manual dropdown.
       id        = "account_username_dashboard"
       name      = "Account Username"
       slug      = "account_username"
@@ -2706,6 +2710,14 @@ resource "metabase_dashboard" "investigations" {
             "variable",
             ["template-tag", "identity_email"]
           ]
+        },
+        {
+          parameter_id = "account_source_dashboard"
+          card_id      = metabase_card.identity_access_at_time.id
+          target = [
+            "variable",
+            ["template-tag", "account_source"]
+          ]
         }
       ]
       series = []
@@ -2713,10 +2725,12 @@ resource "metabase_dashboard" "investigations" {
         column_settings = {
           (jsonencode(["name", "via_account"])) = {
             column_title = "Via Account"
+            # Clicking a Via Account cell sets the Account Source + Account Username filters on
+            # this dashboard. Because via_account/via_source come from the point-in-time snapshot,
+            # they always carry the account's name as of the selected date (handling renames that
+            # a current-names dropdown could not), so the Account Access card below populates.
             click_behavior = {
-              type     = "link"
-              linkType = "dashboard"
-              targetId = 3
+              type = "crossfilter"
               parameterMapping = {
                 account_source_dashboard = {
                   id = "account_source_dashboard"
