@@ -1,7 +1,7 @@
 # Metabase Terraform configuration
 
 Declarative provisioning of the AutoNox Metabase content: 1 PostgreSQL data
-source, 7 table references against the `bi_views` schema, 17 cards, and 3
+source, 8 table references against the `bi_views` schema, 17 cards, and 3
 dashboards (`Who Works Here`, `crossid_policy_coverage`, `Access
 Investigations`).
 

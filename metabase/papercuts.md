@@ -4,6 +4,13 @@
 
 ## solved
 
+0. Access Investigations: account-centric drill + point-in-time correctness
+   - added an optional `[[WHERE via_source = {{account_source}}]]` clause to `identity_access_at_time` so the `Account Source` filter also narrows the Identity Entitlements table
+   - made the `Account Username` filter click-driven (no manual dropdown): clicking a `Via Account` cell in the Identity Entitlements table sets `Account Source` + `Account Username` on the dashboard via `click_behavior` `type = "crossfilter"` (in-place, preserves Snapshot Date + Identity Email)
+   - made `account_source` / `account_username` template tags in `account_access_at_time` `required = false` with `default = ""` so the card shows "No results" (not an error) until an account is picked; `get_account_access_snapshot` returns 0 rows for empty/NULL args
+   - WHY click-only instead of a dependent dropdown: a current-names picker diverges from the point-in-time function. `get_account_access_snapshot(source, username, ts)` matches `ws_local.accounts` by `source + username` valid at `ts`, so a renamed account (e.g. `CORP\ava.bennett-legacy` -> `CORP\ava.bennett`) yields 0 rows when the current name is selected against a past date. Sourcing the username from the snapshot's own `via_account` is the only point-in-time-correct option (Metabase linked filters can't pass the snapshot date into a function — chain-filter only does same-table column equality).
+   - LATENT CAVEAT — identity email: `get_identity_access_snapshot(email, ts)` filters the point-in-time snapshot by `email`, and the `Identity Email` picker supplies the current email. This is the SAME structural trap, but audit showed 0 identities ever changed email vs 81 accounts renamed, so it's safe today. If identity emails ever start changing over time, this picker would silently miss/mismatch history and would need the same treatment.
+
 1. "filter by column" on Who Works Here tables
    - added `Department` filter on `identity_roster` (field-backed search, maps to `identities.department`)
    - added `Account Source` and `Account Status` filters on the accounts table (field-backed search, maps to `accounts.source` and `accounts.status`)

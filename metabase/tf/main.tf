@@ -71,6 +71,12 @@ resource "metabase_table" "entitlements" {
   name   = "entitlements"
 }
 
+resource "metabase_table" "entitlement_risk_attributes" {
+  db_id  = metabase_database.postgres.id
+  schema = "bi_views"
+  name   = "entitlement_risk_attributes"
+}
+
 resource "metabase_table" "entitlement_relations" {
   db_id  = metabase_database.postgres.id
   schema = "bi_views"
@@ -965,7 +971,7 @@ resource "metabase_card" "account_access_at_time" {
   json = jsonencode({
     name                   = "Account Access At Time"
     display                = "table"
-    description            = "Investigation question for an account access snapshot as of the end of a selected day. Pick a date in the dashboard filter and Metabase will evaluate access at 23:59:59 for that day."
+    description            = "Account-centric access snapshot as of the end of the selected day. Click a Via Account value in the Identity Entitlements table above to load that account here; it carries the account name as of the snapshot date, so renamed accounts resolve correctly. Empty until an account is selected."
     cache_ttl              = null
     collection_id          = null
     collection_position    = null
@@ -1905,7 +1911,7 @@ resource "metabase_card" "entitlements_catalog" {
   json = jsonencode({
     name                   = "Entitlements Catalog"
     display                = "table"
-    description            = "Full list of entitlements with description and sensitivity extracted from the attributes JSONB column. Use the Search filter to narrow by name or display name."
+    description            = "Full list of entitlements with sensitivity from source attributes, falling back to Gold decisions. Use the Search filter to narrow by name or display name."
     cache_ttl              = null
     collection_id          = null
     collection_position    = null
@@ -1925,16 +1931,17 @@ resource "metabase_card" "entitlements_catalog" {
               kind,
               name          AS entitlement_name,
               display_name,
-              attributes->>'description'           AS description,
-              CASE WHEN attributes->>'sensitivity' ~ '^\d+$' THEN (attributes->>'sensitivity')::int END AS sensitivity
-            FROM bi_views.entitlements
+              description,
+              risk_sensitivity AS sensitivity,
+              risk_sensitivity_origin AS sensitivity_origin
+            FROM bi_views.entitlement_risk_attributes
             WHERE TRUE
               [[AND (
                 name         ILIKE '%' || {{search}} || '%'
                 OR display_name ILIKE '%' || {{search}} || '%'
               )]]
-              [[AND CASE WHEN attributes->>'sensitivity' ~ '^\d+$' THEN (attributes->>'sensitivity')::int END >= {{sensitivity_min}}]]
-              [[AND {{empty_sensitivity}} = 'yes' AND (attributes->'sensitivity') IS NULL]]
+              [[AND risk_sensitivity >= {{sensitivity_min}}]]
+              [[AND {{empty_sensitivity}} = 'yes' AND risk_sensitivity IS NULL]]
               [[AND source = {{source_filter_ec}}]]
             ORDER BY source, kind, name
           SQL
@@ -2766,8 +2773,28 @@ resource "metabase_dashboard" "investigations" {
       }
     },
     {
+      card_id            = null
+      row                = 12
+      col                = 0
+      size_x             = 24
+      size_y             = 1
+      series             = []
+      parameter_mappings = []
+      visualization_settings = {
+        virtual_card = {
+          name                   = null
+          display                = "text"
+          visualization_settings = {}
+          dataset_query          = {}
+          archived               = false
+        }
+        text                  = "**Account view** — click a **Via Account** value in the table above to load that account's access here. It uses the account name as of the selected snapshot date, so renamed accounts resolve correctly."
+        "dashcard.background" = false
+      }
+    },
+    {
       card_id = metabase_card.account_access_at_time.id
-      row     = 12
+      row     = 13
       col     = 0
       size_x  = 24
       size_y  = 8
@@ -2931,7 +2958,7 @@ resource "metabase_dashboard" "common_entitlements_dashboard" {
 # ---------------------------
 resource "metabase_dashboard" "entitlements_catalog_dashboard" {
   name        = "Entitlements Catalog"
-  description = "Browse all entitlements with their description and sensitivity extracted from the attributes JSONB column. Use Search to filter by name."
+  description = "Browse all entitlements with their description and effective sensitivity. Use Search to filter by name."
 
   parameters_json = jsonencode([
     {
