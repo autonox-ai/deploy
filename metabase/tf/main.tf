@@ -894,6 +894,101 @@ resource "metabase_card" "identity_summary_at_time" {
 }
 
 # ---------------------------
+# Card: Identity Account Sources At Time
+# ---------------------------
+resource "metabase_card" "identity_account_sources_at_time" {
+  json = jsonencode({
+    name                   = "Identity Account Sources At Time"
+    display                = "table"
+    description            = "Account sources held by the selected identity at the snapshot date, including sources with accounts but zero entitlements."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            WITH snapshot AS (
+              SELECT LEAST({{snapshot_timestamp}}::date, CURRENT_DATE - 1) + INTERVAL '1 day' - INTERVAL '1 second' AS ts
+            ),
+            selected_identity AS (
+              SELECT i.identity_id
+              FROM silver_canonical_test.identities i
+              CROSS JOIN snapshot s
+              WHERE i.email = {{identity_email}}
+                AND i.valid_from <= s.ts
+                AND (i.valid_to IS NULL OR i.valid_to > s.ts)
+              ORDER BY i.valid_from DESC, i.identity_id
+              LIMIT 1
+            ),
+            accounts_at_time AS (
+              SELECT
+                a.account_id,
+                a.source,
+                a.username
+              FROM ws_local.accounts a
+              JOIN selected_identity i
+                ON i.identity_id = a.identity_id
+              CROSS JOIN snapshot s
+              WHERE a.valid_from <= s.ts
+                AND (a.valid_to IS NULL OR a.valid_to > s.ts)
+            ),
+            entitlement_links_at_time AS (
+              SELECT
+                a.account_id,
+                e.entitlement_id
+              FROM accounts_at_time a
+              CROSS JOIN snapshot s
+              JOIN ws_local.account_entitlement_membership m
+                ON m.account_id = a.account_id
+               AND m.valid_from <= s.ts
+               AND (m.valid_to IS NULL OR m.valid_to > s.ts)
+              JOIN ws_local.entitlements e
+                ON e.entitlement_id = m.entitlement_id
+               AND e.valid_from <= s.ts
+               AND (e.valid_to IS NULL OR e.valid_to > s.ts)
+            )
+            SELECT
+              a.source,
+              COUNT(DISTINCT a.account_id) AS accounts,
+              COUNT(DISTINCT l.entitlement_id) AS entitlements,
+              STRING_AGG(DISTINCT a.username, ', ' ORDER BY a.username) AS usernames
+            FROM accounts_at_time a
+            LEFT JOIN entitlement_links_at_time l
+              ON l.account_id = a.account_id
+            GROUP BY a.source
+            ORDER BY entitlements DESC, accounts DESC, a.source
+          SQL
+          "template-tags" = {
+            identity_email = {
+              id             = "daf31438-4d6f-4909-9aa4-f747e0f45b65"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = true
+            }
+            snapshot_timestamp = {
+              id             = "a5ddbb2b-4660-41c8-8830-a34d8565b71d"
+              name           = "snapshot_timestamp"
+              "display-name" = "Snapshot Date"
+              type           = "date"
+              required       = true
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
 # Card: Identity Access At Time
 # ---------------------------
 resource "metabase_card" "identity_access_at_time" {
@@ -918,6 +1013,7 @@ resource "metabase_card" "identity_access_at_time" {
             SELECT
               app_name as app,
               entitlement_name as name,
+              entitlement_description as description,
               entitlement_type as kind,
               via_account,
               via_source as source,
@@ -1056,6 +1152,7 @@ resource "metabase_card" "account_access_at_time" {
               app_name,
               app_mapping_source,
               entitlement_name AS name,
+              entitlement_description AS description,
               entitlement_type AS kind,
               entitlement_source AS source,
               access_granted_date
@@ -2750,7 +2847,7 @@ resource "metabase_dashboard" "investigations" {
       card_id = metabase_card.identity_summary_at_time.id
       row     = 0
       col     = 6
-      size_x  = 18
+      size_x  = 10
       size_y  = 4
       parameter_mappings = [
         {
@@ -2772,6 +2869,56 @@ resource "metabase_dashboard" "investigations" {
       ]
       series                 = []
       visualization_settings = {}
+    },
+    {
+      card_id = metabase_card.identity_account_sources_at_time.id
+      row     = 0
+      col     = 16
+      size_x  = 8
+      size_y  = 4
+      parameter_mappings = [
+        {
+          parameter_id = "snapshot_timestamp_dashboard"
+          card_id      = metabase_card.identity_account_sources_at_time.id
+          target = [
+            "variable",
+            ["template-tag", "snapshot_timestamp"]
+          ]
+        },
+        {
+          parameter_id = "identity_email_dashboard"
+          card_id      = metabase_card.identity_account_sources_at_time.id
+          target = [
+            "variable",
+            ["template-tag", "identity_email"]
+          ]
+        }
+      ]
+      series = []
+      visualization_settings = {
+        column_settings = {
+          (jsonencode(["name", "source"])) = {
+            column_title = "Source"
+            click_behavior = {
+              type = "crossfilter"
+              parameterMapping = {
+                account_source_dashboard = {
+                  id = "account_source_dashboard"
+                  source = {
+                    type = "column"
+                    id   = "source"
+                    name = "source"
+                  }
+                  target = {
+                    type = "parameter"
+                    id   = "account_source_dashboard"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     },
     {
       card_id = metabase_card.identity_access_at_time.id
