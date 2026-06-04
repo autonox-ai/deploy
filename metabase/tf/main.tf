@@ -987,11 +987,9 @@ resource "metabase_card" "account_access_at_time" {
           "lib/type" = "mbql.stage/native"
           native     = <<-SQL
             SELECT
-              account_id,
               username,
               source,
               account_status,
-              identity_id,
               display_name,
               email,
               app_name,
