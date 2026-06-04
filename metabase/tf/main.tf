@@ -858,12 +858,10 @@ resource "metabase_card" "identity_summary_at_time" {
           "lib/type" = "mbql.stage/native"
           native     = <<-SQL
             SELECT DISTINCT
-              identity_id,
-              display_name,
+              display_name as name,
               email,
-              employment_status,
+              employment_status as status,
               department,
-              org_unit_id,
               org_unit_name,
               org_unit_path,
               org_unit_type
@@ -918,11 +916,11 @@ resource "metabase_card" "identity_access_at_time" {
           "lib/type" = "mbql.stage/native"
           native     = <<-SQL
             SELECT
-              app_name,
-              entitlement_name,
-              entitlement_type,
+              app_name as app,
+              entitlement_name as name,
+              entitlement_type as kind,
               via_account,
-              via_source,
+              via_source as source,
               access_granted_date
             FROM audit.get_identity_access_snapshot(
               {{identity_email}},
@@ -965,6 +963,74 @@ resource "metabase_card" "identity_access_at_time" {
 }
 
 # ---------------------------
+# Card: Account Summary At Time
+# ---------------------------
+resource "metabase_card" "account_summary_at_time" {
+  json = jsonencode({
+    name                   = "Account Summary At Time"
+    display                = "table"
+    description            = "Account details for the selected account and snapshot date. Empty until an account is selected."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT DISTINCT
+              username,
+              source,
+              account_status as status,
+              display_name as name,
+              email
+            FROM audit.get_account_access_snapshot(
+              {{account_source}},
+              {{account_username}},
+              LEAST({{snapshot_timestamp}}::date, CURRENT_DATE - 1) + INTERVAL '1 day' - INTERVAL '1 second'
+            )
+            ORDER BY
+              source,
+              username
+          SQL
+          "template-tags" = {
+            account_source = {
+              id             = "8de1f45f-e02a-4511-9838-4abb01a4b548"
+              name           = "account_source"
+              "display-name" = "Account Source"
+              type           = "text"
+              required       = false
+              default        = ""
+            }
+            account_username = {
+              id             = "5ba4c157-2c7b-4210-9526-76bd21b126f2"
+              name           = "account_username"
+              "display-name" = "Account Username"
+              type           = "text"
+              required       = false
+              default        = ""
+            }
+            snapshot_timestamp = {
+              id             = "f4e1e3b1-fb9b-4b72-b18c-1c1b85ca87ff"
+              name           = "snapshot_timestamp"
+              "display-name" = "Snapshot Date"
+              type           = "date"
+              required       = true
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
 # Card: Account Access At Time
 # ---------------------------
 resource "metabase_card" "account_access_at_time" {
@@ -987,16 +1053,11 @@ resource "metabase_card" "account_access_at_time" {
           "lib/type" = "mbql.stage/native"
           native     = <<-SQL
             SELECT
-              username,
-              source,
-              account_status,
-              display_name,
-              email,
               app_name,
               app_mapping_source,
-              entitlement_name,
-              entitlement_type,
-              entitlement_source,
+              entitlement_name AS name,
+              entitlement_type AS kind,
+              entitlement_source AS source,
               access_granted_date
             FROM audit.get_account_access_snapshot(
               {{account_source}},
@@ -1777,18 +1838,17 @@ resource "metabase_card" "differing_entitlements" {
             )
             SELECT
               app_name,
-              entitlement_name,
-              source_key,
-              entitlement_type,
-              via_source AS source,
+              STRING_AGG(DISTINCT identity_email, ', ' ORDER BY identity_email) AS held_by,
+              entitlement_name AS name,
               description,
+              entitlement_type as type,
+              via_source AS source,
               COUNT(DISTINCT identity_email) AS held_by_count,
-              (SELECT n FROM email_count) AS total_identities,
-              STRING_AGG(DISTINCT identity_email, ', ' ORDER BY identity_email) AS held_by
+              (SELECT n FROM email_count) AS total_identities
             FROM all_access
             WHERE TRUE
               [[AND via_source = {{source_filter}}]]
-            GROUP BY entitlement_id, app_name, entitlement_name, source_key, entitlement_type, via_source, description
+            GROUP BY entitlement_id, app_name, entitlement_name, entitlement_type, via_source, description
             HAVING COUNT(DISTINCT identity_email) < (SELECT n FROM email_count)
             ORDER BY app_name, entitlement_name, via_source
           SQL
@@ -2667,10 +2727,30 @@ resource "metabase_dashboard" "investigations" {
 
   cards_json = jsonencode([
     {
+      card_id            = null
+      row                = 0
+      col                = 0
+      size_x             = 6
+      size_y             = 4
+      series             = []
+      parameter_mappings = []
+      visualization_settings = {
+        virtual_card = {
+          name                   = null
+          display                = "text"
+          visualization_settings = {}
+          dataset_query          = {}
+          archived               = false
+        }
+        text                  = "**Identity view** — choose an identity and snapshot date to inspect their access at the end of that day. Click a **Via Account** value below to pivot into the account view."
+        "dashcard.background" = false
+      }
+    },
+    {
       card_id = metabase_card.identity_summary_at_time.id
       row     = 0
-      col     = 0
-      size_x  = 24
+      col     = 6
+      size_x  = 18
       size_y  = 4
       parameter_mappings = [
         {
@@ -2774,8 +2854,8 @@ resource "metabase_dashboard" "investigations" {
       card_id            = null
       row                = 12
       col                = 0
-      size_x             = 24
-      size_y             = 1
+      size_x             = 6
+      size_y             = 3
       series             = []
       parameter_mappings = []
       visualization_settings = {
@@ -2791,8 +2871,43 @@ resource "metabase_dashboard" "investigations" {
       }
     },
     {
+      card_id = metabase_card.account_summary_at_time.id
+      row     = 12
+      col     = 6
+      size_x  = 18
+      size_y  = 3
+      parameter_mappings = [
+        {
+          parameter_id = "snapshot_timestamp_dashboard"
+          card_id      = metabase_card.account_summary_at_time.id
+          target = [
+            "variable",
+            ["template-tag", "snapshot_timestamp"]
+          ]
+        },
+        {
+          parameter_id = "account_source_dashboard"
+          card_id      = metabase_card.account_summary_at_time.id
+          target = [
+            "variable",
+            ["template-tag", "account_source"]
+          ]
+        },
+        {
+          parameter_id = "account_username_dashboard"
+          card_id      = metabase_card.account_summary_at_time.id
+          target = [
+            "variable",
+            ["template-tag", "account_username"]
+          ]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
       card_id = metabase_card.account_access_at_time.id
-      row     = 13
+      row     = 15
       col     = 0
       size_x  = 24
       size_y  = 8
