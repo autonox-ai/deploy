@@ -1475,6 +1475,329 @@ resource "metabase_card" "account_entitlement_relationships" {
 }
 
 # ---------------------------
+# Card: Access Explorer Identity Summary
+# ---------------------------
+resource "metabase_card" "access_explorer_identity_summary" {
+  json = jsonencode({
+    name                   = "Access Explorer Identity Summary"
+    display                = "table"
+    description            = "Current identity context for Access Explorer."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT
+              display_name AS name,
+              email,
+              status,
+              department,
+              org_unit_name,
+              org_unit_path,
+              org_unit_type
+            FROM bi_views.active_identities
+            WHERE email = {{identity_email}}
+            LIMIT 1
+          SQL
+          "template-tags" = {
+            identity_email = {
+              id             = "f38cf1ad-c1de-4f50-8562-0f375d643f48"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = true
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
+# Card: Access Explorer Account Sources
+# ---------------------------
+resource "metabase_card" "access_explorer_account_sources" {
+  json = jsonencode({
+    name                   = "Access Explorer Account Sources"
+    display                = "table"
+    description            = "Current account sources for the selected identity, including sources with accounts but zero entitlements."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            WITH selected_identity AS (
+              SELECT identity_id
+              FROM bi_views.active_identities
+              WHERE email = {{identity_email}}
+              LIMIT 1
+            ),
+            accounts AS (
+              SELECT
+                a.account_id,
+                a.source,
+                a.username
+              FROM bi_views.accounts a
+              JOIN selected_identity i
+                ON i.identity_id = a.identity_id
+            ),
+            entitlement_links AS (
+              SELECT DISTINCT
+                ie.assigned_via_source AS source,
+                ie.assigned_via_account AS username,
+                ie.entitlement_id
+              FROM bi_views.identity_entitlements ie
+              WHERE ie.email = {{identity_email}}
+            )
+            SELECT
+              a.source,
+              COUNT(DISTINCT a.account_id) AS accounts,
+              COUNT(DISTINCT e.entitlement_id) AS entitlements,
+              STRING_AGG(DISTINCT a.username, ', ' ORDER BY a.username) AS usernames
+            FROM accounts a
+            LEFT JOIN entitlement_links e
+              ON e.source = a.source
+             AND e.username = a.username
+            GROUP BY a.source
+            ORDER BY entitlements DESC, accounts DESC, a.source
+          SQL
+          "template-tags" = {
+            identity_email = {
+              id             = "c50cccea-e9c7-4f3f-b77a-80cfbc6da6a1"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = true
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
+# Card: Access Explorer Identity Entitlements
+# ---------------------------
+resource "metabase_card" "access_explorer_identity_entitlements" {
+  json = jsonencode({
+    name                   = "Access Explorer Identity Entitlements"
+    display                = "table"
+    description            = "Current entitlements for the selected identity."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT
+              app_name AS app,
+              entitlement_name AS name,
+              entitlement_description AS description,
+              entitlement_type AS kind,
+              assigned_via_account AS via_account,
+              assigned_via_source AS source
+            FROM bi_views.identity_entitlements
+            WHERE email = {{identity_email}}
+              [[AND assigned_via_source = {{account_source}}]]
+              [[AND (
+                entitlement_name ILIKE '%' || {{search}} || '%'
+                OR entitlement_description ILIKE '%' || {{search}} || '%'
+              )]]
+            ORDER BY
+              COALESCE(app_name, ''),
+              entitlement_name,
+              assigned_via_source,
+              assigned_via_account
+          SQL
+          "template-tags" = {
+            identity_email = {
+              id             = "4cfcdada-7df4-4a80-9f19-f36113e061a1"
+              name           = "identity_email"
+              "display-name" = "Identity Email"
+              type           = "text"
+              required       = true
+            }
+            account_source = {
+              id             = "1e36eacf-23e0-4b49-95c2-1449768e3d36"
+              name           = "account_source"
+              "display-name" = "Account Source"
+              type           = "text"
+              required       = false
+            }
+            search = {
+              id             = "5076fd30-4116-48ec-a273-e6ba3f048381"
+              name           = "search"
+              "display-name" = "Entitlement Search"
+              type           = "text"
+              required       = false
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
+# Card: Access Explorer Account Summary
+# ---------------------------
+resource "metabase_card" "access_explorer_account_summary" {
+  json = jsonencode({
+    name                   = "Access Explorer Account Summary"
+    display                = "table"
+    description            = "Current account details for the selected account. Empty until an account is selected."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT
+              a.username,
+              a.source,
+              a.status,
+              i.display_name AS name,
+              i.email
+            FROM bi_views.accounts a
+            LEFT JOIN bi_views.active_identities i
+              ON i.identity_id = a.identity_id
+            WHERE a.source = {{account_source}}
+              AND a.username = {{account_username}}
+            ORDER BY a.source, a.username
+          SQL
+          "template-tags" = {
+            account_source = {
+              id             = "b224f4ca-d1ce-4df3-9d75-6690074e3cc7"
+              name           = "account_source"
+              "display-name" = "Account Source"
+              type           = "text"
+              required       = false
+              default        = ""
+            }
+            account_username = {
+              id             = "910891d3-508d-495c-9d9b-927e6fb3bbbf"
+              name           = "account_username"
+              "display-name" = "Account Username"
+              type           = "text"
+              required       = false
+              default        = ""
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
+# Card: Access Explorer Account Entitlements
+# ---------------------------
+resource "metabase_card" "access_explorer_account_entitlements" {
+  json = jsonencode({
+    name                   = "Access Explorer Account Entitlements"
+    display                = "table"
+    description            = "Current entitlements for the selected account. Empty until an account is selected."
+    cache_ttl              = null
+    collection_id          = null
+    collection_position    = null
+    query_type             = "native"
+    parameters             = []
+    parameter_mappings     = []
+    visualization_settings = {}
+    dataset_query = {
+      database   = metabase_database.postgres.id
+      "lib/type" = "mbql/query"
+      stages = [
+        {
+          "lib/type" = "mbql.stage/native"
+          native     = <<-SQL
+            SELECT
+              app_name AS app,
+              app_mapping_source,
+              entitlement_name AS name,
+              entitlement_description AS description,
+              entitlement_type AS kind,
+              entitlement_source AS source
+            FROM bi_views.identity_entitlements
+            WHERE assigned_via_source = {{account_source}}
+              AND assigned_via_account = {{account_username}}
+              [[AND (
+                entitlement_name ILIKE '%' || {{search}} || '%'
+                OR entitlement_description ILIKE '%' || {{search}} || '%'
+              )]]
+            ORDER BY
+              COALESCE(app_name, ''),
+              entitlement_name,
+              entitlement_source
+          SQL
+          "template-tags" = {
+            account_source = {
+              id             = "eb988fb1-50e8-4c16-9e7f-b19045dac471"
+              name           = "account_source"
+              "display-name" = "Account Source"
+              type           = "text"
+              required       = false
+              default        = ""
+            }
+            account_username = {
+              id             = "b8256b68-2c59-45e7-9f48-1faed24c72b0"
+              name           = "account_username"
+              "display-name" = "Account Username"
+              type           = "text"
+              required       = false
+              default        = ""
+            }
+            search = {
+              id             = "8c45490d-afbc-48cb-8ac0-a46a15d7be13"
+              name           = "search"
+              "display-name" = "Entitlement Search"
+              type           = "text"
+              required       = false
+            }
+          }
+        }
+      ]
+    }
+  })
+}
+
+# ---------------------------
 # Card: Affected Identities (Latest Snapshot)
 # ---------------------------
 resource "metabase_card" "crossid_affected_identities_latest" {
@@ -3081,6 +3404,296 @@ resource "metabase_dashboard" "investigations" {
           target = [
             "variable",
             ["template-tag", "account_username"]
+          ]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    }
+  ])
+}
+
+# ---------------------------
+# Dashboard: Access Explorer
+# ---------------------------
+resource "metabase_dashboard" "access_explorer" {
+  name        = "Access Explorer"
+  description = "Current-state access workflow. Browse current identity and account access without choosing a snapshot date; use Access Investigations for historical point-in-time review."
+
+  parameters_json = jsonencode([
+    {
+      id                 = "identity_email_explorer"
+      name               = "Identity Email"
+      slug               = "identity_email"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "search"
+      values_source_type = "card"
+      values_source_config = {
+        card_id     = metabase_card.identity_email_values.id
+        value_field = ["field", "email", { "base-type" = "type/Text" }]
+      }
+    },
+    {
+      id                 = "account_source_explorer"
+      name               = "Account Source"
+      slug               = "account_source"
+      type               = "string/="
+      sectionId          = "string"
+      values_query_type  = "list"
+      values_source_type = "card"
+      values_source_config = {
+        card_id     = metabase_card.source_values.id
+        value_field = ["field", "source", { "base-type" = "type/Text" }]
+      }
+    },
+    {
+      id        = "account_username_explorer"
+      name      = "Account Username"
+      slug      = "account_username"
+      type      = "string/="
+      sectionId = "string"
+    },
+    {
+      id        = "entitlement_search_explorer"
+      name      = "Entitlement Search"
+      slug      = "entitlement_search"
+      type      = "string/contains"
+      sectionId = "string"
+    }
+  ])
+
+  cards_json = jsonencode([
+    {
+      card_id            = null
+      row                = 0
+      col                = 0
+      size_x             = 6
+      size_y             = 4
+      series             = []
+      parameter_mappings = []
+      visualization_settings = {
+        virtual_card = {
+          name                   = null
+          display                = "text"
+          visualization_settings = {}
+          dataset_query          = {}
+          archived               = false
+        }
+        text                  = "**Current access** — select an identity to browse their current accounts and entitlements. Click a source to filter the entitlement table, or click a **Via Account** value to inspect that account."
+        "dashcard.background" = false
+      }
+    },
+    {
+      card_id = metabase_card.access_explorer_identity_summary.id
+      row     = 0
+      col     = 6
+      size_x  = 10
+      size_y  = 4
+      parameter_mappings = [
+        {
+          parameter_id = "identity_email_explorer"
+          card_id      = metabase_card.access_explorer_identity_summary.id
+          target = [
+            "variable",
+            ["template-tag", "identity_email"]
+          ]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
+      card_id = metabase_card.access_explorer_account_sources.id
+      row     = 0
+      col     = 16
+      size_x  = 8
+      size_y  = 4
+      parameter_mappings = [
+        {
+          parameter_id = "identity_email_explorer"
+          card_id      = metabase_card.access_explorer_account_sources.id
+          target = [
+            "variable",
+            ["template-tag", "identity_email"]
+          ]
+        }
+      ]
+      series = []
+      visualization_settings = {
+        column_settings = {
+          (jsonencode(["name", "source"])) = {
+            column_title = "Source"
+            click_behavior = {
+              type = "crossfilter"
+              parameterMapping = {
+                account_source_explorer = {
+                  id = "account_source_explorer"
+                  source = {
+                    type = "column"
+                    id   = "source"
+                    name = "source"
+                  }
+                  target = {
+                    type = "parameter"
+                    id   = "account_source_explorer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      card_id = metabase_card.access_explorer_identity_entitlements.id
+      row     = 4
+      col     = 0
+      size_x  = 24
+      size_y  = 8
+      parameter_mappings = [
+        {
+          parameter_id = "identity_email_explorer"
+          card_id      = metabase_card.access_explorer_identity_entitlements.id
+          target = [
+            "variable",
+            ["template-tag", "identity_email"]
+          ]
+        },
+        {
+          parameter_id = "account_source_explorer"
+          card_id      = metabase_card.access_explorer_identity_entitlements.id
+          target = [
+            "variable",
+            ["template-tag", "account_source"]
+          ]
+        },
+        {
+          parameter_id = "entitlement_search_explorer"
+          card_id      = metabase_card.access_explorer_identity_entitlements.id
+          target = [
+            "variable",
+            ["template-tag", "search"]
+          ]
+        }
+      ]
+      series = []
+      visualization_settings = {
+        column_settings = {
+          (jsonencode(["name", "via_account"])) = {
+            column_title = "Via Account"
+            click_behavior = {
+              type = "crossfilter"
+              parameterMapping = {
+                account_source_explorer = {
+                  id = "account_source_explorer"
+                  source = {
+                    type = "column"
+                    id   = "source"
+                    name = "source"
+                  }
+                  target = {
+                    type = "parameter"
+                    id   = "account_source_explorer"
+                  }
+                }
+                account_username_explorer = {
+                  id = "account_username_explorer"
+                  source = {
+                    type = "column"
+                    id   = "via_account"
+                    name = "via_account"
+                  }
+                  target = {
+                    type = "parameter"
+                    id   = "account_username_explorer"
+                  }
+                }
+              }
+            }
+          }
+          (jsonencode(["name", "source"])) = {
+            column_title = "Source"
+          }
+        }
+      }
+    },
+    {
+      card_id            = null
+      row                = 12
+      col                = 0
+      size_x             = 6
+      size_y             = 3
+      series             = []
+      parameter_mappings = []
+      visualization_settings = {
+        virtual_card = {
+          name                   = null
+          display                = "text"
+          visualization_settings = {}
+          dataset_query          = {}
+          archived               = false
+        }
+        text                  = "**Account view** — click a **Via Account** value above to load current access for that account. Use Access Investigations when you need a historical account name or date-specific state."
+        "dashcard.background" = false
+      }
+    },
+    {
+      card_id = metabase_card.access_explorer_account_summary.id
+      row     = 12
+      col     = 6
+      size_x  = 18
+      size_y  = 3
+      parameter_mappings = [
+        {
+          parameter_id = "account_source_explorer"
+          card_id      = metabase_card.access_explorer_account_summary.id
+          target = [
+            "variable",
+            ["template-tag", "account_source"]
+          ]
+        },
+        {
+          parameter_id = "account_username_explorer"
+          card_id      = metabase_card.access_explorer_account_summary.id
+          target = [
+            "variable",
+            ["template-tag", "account_username"]
+          ]
+        }
+      ]
+      series                 = []
+      visualization_settings = {}
+    },
+    {
+      card_id = metabase_card.access_explorer_account_entitlements.id
+      row     = 15
+      col     = 0
+      size_x  = 24
+      size_y  = 8
+      parameter_mappings = [
+        {
+          parameter_id = "account_source_explorer"
+          card_id      = metabase_card.access_explorer_account_entitlements.id
+          target = [
+            "variable",
+            ["template-tag", "account_source"]
+          ]
+        },
+        {
+          parameter_id = "account_username_explorer"
+          card_id      = metabase_card.access_explorer_account_entitlements.id
+          target = [
+            "variable",
+            ["template-tag", "account_username"]
+          ]
+        },
+        {
+          parameter_id = "entitlement_search_explorer"
+          card_id      = metabase_card.access_explorer_account_entitlements.id
+          target = [
+            "variable",
+            ["template-tag", "search"]
           ]
         }
       ]
