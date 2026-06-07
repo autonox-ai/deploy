@@ -920,7 +920,7 @@ resource "metabase_card" "identity_account_sources_at_time" {
             ),
             selected_identity AS (
               SELECT i.identity_id
-              FROM silver_canonical_test.identities i
+              FROM analytics.identity_history i
               CROSS JOIN snapshot s
               WHERE i.email = {{identity_email}}
                 AND i.valid_from <= s.ts
@@ -933,27 +933,19 @@ resource "metabase_card" "identity_account_sources_at_time" {
                 a.account_id,
                 a.source,
                 a.username
-              FROM ws_local.accounts a
+              FROM snapshot s
+              CROSS JOIN LATERAL audit.get_accounts_snapshot(s.ts) a
               JOIN selected_identity i
                 ON i.identity_id = a.identity_id
-              CROSS JOIN snapshot s
-              WHERE a.valid_from <= s.ts
-                AND (a.valid_to IS NULL OR a.valid_to > s.ts)
             ),
             entitlement_links_at_time AS (
               SELECT
-                a.account_id,
-                e.entitlement_id
-              FROM accounts_at_time a
-              CROSS JOIN snapshot s
-              JOIN ws_local.account_entitlement_membership m
-                ON m.account_id = a.account_id
-               AND m.valid_from <= s.ts
-               AND (m.valid_to IS NULL OR m.valid_to > s.ts)
-              JOIN ws_local.entitlements e
-                ON e.entitlement_id = m.entitlement_id
-               AND e.valid_from <= s.ts
-               AND (e.valid_to IS NULL OR e.valid_to > s.ts)
+                d.account_id,
+                d.entitlement_id
+              FROM snapshot s
+              CROSS JOIN LATERAL audit.get_access_snapshot_detailed(s.ts) d
+              JOIN accounts_at_time a
+                ON a.account_id = d.account_id
             )
             SELECT
               a.source,
