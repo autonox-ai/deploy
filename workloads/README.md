@@ -19,9 +19,8 @@ scripts will succeed.
 
 ```
 workloads/
-├── exporters/    # Pull data from upstream sources into the warehouse
-├── warehouse/    # Migrations + materializations on the autonox database
-└── flows/        # Reconciliation / policy flows on top of the warehouse
+├── import/       # End-to-end collection-to-warehouse import orchestration
+└── warehouse/    # Migrations + materializations on the autonox database
 ```
 
 > Each `run.sh` here is a **skeleton**. It demonstrates the invocation shape
@@ -38,13 +37,19 @@ Every workload assumes:
    path) or via the `pgvector` service (Kubernetes path).
 3. Credentials are passed via environment variables, never baked into images.
 
-## Running a workload (example shape)
+## Running a standalone workload (example shape)
 
 ```bash
-cd workloads/exporters
-cp .env.example .env       # fill in connection + source-system credentials
+cd workloads/warehouse
+cp .env.example .env       # fill in the required connection settings
 bash run.sh
 ```
 
 For Kubernetes, equivalent invocations are typically packaged as `CronJob`s
 in the customer overlay; the same env vars apply.
+
+## Import orchestration
+
+[`import/import-orchestration.md`](import/import-orchestration.md) defines the
+end-to-end collection-to-warehouse lifecycle, durable hand-offs, recovery, and
+ETL/scheduler integration requirements.
