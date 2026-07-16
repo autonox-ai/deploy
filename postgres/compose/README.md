@@ -13,7 +13,7 @@ set after startup with [`../bootstrap/passwords.sql`](../bootstrap/passwords.sql
 
 ## What you get
 
-- image: `pgvector/pgvector:0.8.2-pg18-trixie`
+- image: `pgvector/pgvector:0.8.5-pg18-trixie`
 - container name: `nox-pg18`
 - Docker network: `autonox-local`
 - Docker volume: `autonox-pgdata`
@@ -25,7 +25,7 @@ set after startup with [`../bootstrap/passwords.sql`](../bootstrap/passwords.sql
 Connected environment:
 
 ```bash
-docker pull --platform=linux/amd64 pgvector/pgvector:0.8.2-pg18-trixie
+docker pull --platform=linux/amd64 pgvector/pgvector:0.8.5-pg18-trixie
 ```
 
 Air-gapped handoff: see [`../../images/airgap/README.md`](../../images/airgap/README.md).

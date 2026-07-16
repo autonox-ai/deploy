@@ -26,6 +26,6 @@ ghcr.io/autonox-ai/reconciliation:sha-d7a1ca3-enterprise
 #   - postgres/kustomize/components/images/kustomization.yaml
 #   - metabase/compose/compose.yaml
 #   - metabase/kustomize/components/images/kustomization.yaml
-pgvector/pgvector:0.8.2-pg18-trixie
+pgvector/pgvector:0.8.5-pg18-trixie
 metabase/metabase:v0.58.x
 hashicorp/terraform:1.9

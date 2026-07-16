@@ -3,7 +3,7 @@ name: autonox-postgres
 services:
   postgres:
     container_name: nox-pg18
-    image: pgvector/pgvector:0.8.2-pg18-trixie
+    image: pgvector/pgvector:0.8.5-pg18-trixie
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}

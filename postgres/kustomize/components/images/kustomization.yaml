@@ -3,4 +3,4 @@ kind: Component
 
 images:
   - name: pgvector/pgvector
-    newTag: 0.8.2-pg18-trixie
+    newTag: 0.8.5-pg18-trixie
