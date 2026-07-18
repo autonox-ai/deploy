@@ -1,0 +1,17 @@
+$schema: https://autonox.ai/schemas/warehouse/canonical.config.spec.v1.schema.json
+kind: warehouse.canonical.config.spec.v1
+metadata:
+  name: testkit-warehouse-canonical
+spec:
+  control_plane:
+    kind: postgres
+    schema: warehouse
+    database:
+      provider: env
+      ref: WAREHOUSE_POSTGRES_DSN
+  canonical_store:
+    kind: postgres
+    shared_schema: shared
+    database:
+      provider: env
+      ref: WAREHOUSE_POSTGRES_DSN

@@ -1,0 +1,35 @@
+kind: collector.postgres.v1
+metadata:
+  name: mock-hr-collector
+spec:
+  system_instance_id: mock-hr
+  connection_ref: connection.postgres.v1/mock-hr
+  streams:
+    - stream_id: accounts
+      kind: entity
+      object_type: mock_hr_account
+      mode: snapshot
+      record_identity:
+        primary_key:
+          fields:
+            - /source_key
+      extraction:
+        type: pg_query
+        sql: |
+          SELECT user_id AS source_key, username,
+                 json_build_object('employee_id', employee_id, 'email', email) AS account_attributes
+          FROM mock_hr.users ORDER BY user_id
+    - stream_id: identity_links
+      kind: entity
+      object_type: mock_hr_identity_link
+      mode: snapshot
+      record_identity:
+        primary_key:
+          fields:
+            - /source_key
+      extraction:
+        type: pg_query
+        sql: |
+          SELECT user_id AS source_key, 'worker' AS object_type,
+                 json_build_object('employee_id', employee_id) AS link_attributes
+          FROM mock_hr.users ORDER BY user_id

@@ -1,0 +1,8 @@
+kind: connection.warehouse.postgres.v1
+metadata:
+  name: warehouse-target
+  scope: default
+spec:
+  dsn:
+    env:
+      name: RECONCILE_WAREHOUSE_DSN

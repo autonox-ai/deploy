@@ -1,0 +1,21 @@
+$schema: https://autonox.ai/schemas/reconciliation/wiring.spec.v1.schema.json
+materialization_catalog:
+  - file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/materialization.catalog.yaml
+connection_catalog:
+  - file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/connections.yaml
+control_plane_store:
+  kind: postgres
+  database:
+    provider: env
+    ref: RECONCILE_POSTGRES_DSN
+  schema: reconciliation
+secrets_providers:
+  env:
+    kind: env
+group_policy:
+  minimum_guarantee: none
+target_mapping:
+  warehouse/ws_hello:
+    target_kind: warehouse
+    materialization_spec_ref: materialize.warehouse.v1/mock-hr/default
+    connection_ref: connection.warehouse.postgres.v1/warehouse-target/default

@@ -1,0 +1,44 @@
+$schema: https://autonox.ai/schemas/silver/flow-import.v1.schema.json
+kind: flow.import.v1
+metadata:
+  name: mock-hr
+spec:
+  lifecycle:
+    source_type: hard_delete
+    sanity_checks:
+      max_deletion_rate: 1.0
+      min_entities_threshold: 1
+  mapper:
+    mappings:
+      - raw_object_type: mock_hr_account
+        canonical_entity: account
+        spec:
+          partitions:
+            columns:
+              source_key: root.source_key
+              source:
+                pipe:
+                  - const: mock_hr
+              username: root.username
+              account_attributes: root.account_attributes
+              status:
+                pipe:
+                  - const: active
+        provenance:
+          content_hash_attributes: [source_key, username]
+      - raw_object_type: mock_hr_identity_link
+        canonical_entity: identity_source_link
+        spec:
+          partitions:
+            columns:
+              source_key: root.source_key
+              source:
+                pipe:
+                  - const: mock_hr
+              object_type: root.object_type
+              link_attributes: root.link_attributes
+              status:
+                pipe:
+                  - const: active
+        provenance:
+          content_hash_attributes: [source_key]

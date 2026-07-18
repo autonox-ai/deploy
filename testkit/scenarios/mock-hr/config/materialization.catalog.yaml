@@ -1,0 +1,6 @@
+specs:
+  - kind: materialize.warehouse.v1
+    name: mock-hr
+    scope: default
+    uri: file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/materialize.warehouse.yaml
+    schema_id: https://autonox.ai/schemas/reconciliation/materialize.warehouse.v1.schema.json

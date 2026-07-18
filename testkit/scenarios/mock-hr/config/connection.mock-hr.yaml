@@ -1,0 +1,8 @@
+kind: connection.postgres.v1
+metadata:
+  name: mock-hr
+  scope: default
+spec:
+  dsn:
+    env:
+      name: POSTGRES_DSN

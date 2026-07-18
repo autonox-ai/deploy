@@ -1,0 +1,19 @@
+kind: materialize.warehouse.v1
+metadata:
+  name: mock-hr
+  scope: default
+spec:
+  connection_ref: connection.warehouse.postgres.v1/warehouse-target/default
+  group_policy:
+    minimum_guarantee: none
+  operations:
+    defaults:
+      compile: {}
+      apply:
+        strategy: direct
+        transaction_mode: per_plan
+        schema_routing:
+          shared_schema: shared
+      observe:
+        non_terminal_mode: readback_presence
+        terminal_mode: readback_absence

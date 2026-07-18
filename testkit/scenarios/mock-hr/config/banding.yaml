@@ -1,0 +1,23 @@
+$schema: https://autonox.ai/schemas/silver/banding-system.v1.schema.json
+kind: banding.system.v1
+metadata:
+  name: mock-hr
+spec:
+  matching:
+    banding_attributes:
+      mock_hr: employee_id
+    account_identity_attributes:
+      mock_hr:
+        account_attribute: employee_id
+  attribute_merge:
+    partitions:
+      output:
+        identity_kind:
+          pipe:
+            - const: human
+        primary_hr_key: sources.mock_hr.employee_id
+        display_name:
+          - sources.mock_hr.employee_id
+        email:
+          - sources.mock_hr.email
+        core_attributes: sources.mock_hr
