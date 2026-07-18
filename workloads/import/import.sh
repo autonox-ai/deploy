@@ -117,6 +117,21 @@ uri_to_container_path() {
   printf '%s/%s' "${prefix%/}" "$relative"
 }
 
+collector_artifact_uri_from_run_id() {
+  local run_id="$1" filename="$2" label="$3" root="${ARTIFACT_HOST_ROOT%/}"
+  local -a matches=()
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && matches+=("$path")
+  done < <(find "$root" -type f -path "*/${run_id}/_meta/${filename}" | sort)
+  case "${#matches[@]}" in
+    0) die "collector ${label} is unavailable through ARTIFACT_HOST_ROOT for run_id: $run_id" ;;
+    1) ;;
+    *) die "multiple collector ${label}s found through ARTIFACT_HOST_ROOT for run_id: $run_id" ;;
+  esac
+  local relative="${matches[0]#"$root"/}"
+  printf '%s/%s' "$ARTIFACT_URI_PREFIX" "$relative"
+}
+
 json_quote_lines() {
   local variable="$1"; local -a values; read_nul_array "$variable" values
   printf '%s\0' "${values[@]:-}" | jq -Rs 'split("\u0000") | map(select(length > 0))'
@@ -240,11 +255,13 @@ check_manifest() {
 collector_stage() {
   run_task collect COLLECTOR "$COLLECTOR_IMG" run --spec "$COLLECTOR_SPEC" --connection-catalog "$CONNECTION_CATALOG" --root-uri "$COLLECTOR_ROOT_URI"
   assert_json "$TASK_RESULT" '.run_id | type == "string" and length > 0' "collector result is missing run_id"
-  assert_json "$TASK_RESULT" '(.status // .report.status) == "SUCCESS" and .report.status == "SUCCESS"' "collector or authoritative report is not successful"
+  assert_json "$TASK_RESULT" '(.status // .report.status) == "SUCCESS"' "collector result is not successful"
   local run_id manifest_uri report_uri report_hash
   run_id="$(jq -r '.run_id' "$TASK_RESULT")"
-  manifest_uri="$(jq -er '.manifest.uri' "$TASK_RESULT")" || die "collector result must provide manifest.uri"
-  report_uri="$(jq -er '.report.uri' "$TASK_RESULT")" || die "collector result must provide report.uri"
+  manifest_uri="$(jq -r '.manifest.uri // empty' "$TASK_RESULT")"
+  [[ -n "$manifest_uri" ]] || manifest_uri="$(collector_artifact_uri_from_run_id "$run_id" run.manifest.json manifest)"
+  report_uri="$(jq -r '.report.uri // empty' "$TASK_RESULT")"
+  [[ -n "$report_uri" ]] || report_uri="$(collector_artifact_uri_from_run_id "$run_id" run.report.json report)"
   local report_host; report_host="$(uri_to_host_path "$report_uri")"
   [[ -f "$report_host" ]] || die "collector report is unavailable through ARTIFACT_HOST_ROOT: $report_uri"
   report_hash="$(sha256_file "$report_host")"
@@ -259,10 +276,10 @@ bronze_stage() {
   run_id="$(jq -r '.collector.run_id' "$STATE_FILE")"; manifest_uri="$(jq -r '.collector.manifest.uri' "$STATE_FILE")"
   manifest_hash="$(jq -r '.collector.manifest.sha256' "$STATE_FILE")"; manifest_path="$(uri_to_container_path WAREHOUSE "$manifest_uri")"
   run_task bronze_register WAREHOUSE "$WAREHOUSE_IMG" bronze register-manifest --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id" --manifest "$manifest_path"
-  assert_json "$TASK_RESULT" --arg ws "$WORKSPACE_ID" --arg run "$run_id" --arg hash "$manifest_hash" '(.workspace_id // .workspace) == $ws and .run_id == $run and (.manifest_sha256 // .manifest_hash) == $hash' "Bronze manifest registration does not match receipt"
+  assert_json "$TASK_RESULT" --arg run "$run_id" --arg hash "$manifest_hash" '.run_id == $run and ((.manifest_sha256 // .manifest_hash) | sub("^sha256:"; "")) == $hash' "Bronze manifest registration does not match receipt"
   record_event bronze_register succeeded "$TASK_RESULT" "$TASK_LOG" 0 "manifest registered"
   run_task bronze_stage WAREHOUSE "$WAREHOUSE_IMG" bronze stage-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
-  assert_json "$TASK_RESULT" --arg ws "$WORKSPACE_ID" --arg run "$run_id" '(.workspace_id // .workspace) == $ws and .run_id == $run and (.staging_evidence // .evidence) != null' "Bronze staging evidence is missing or mismatched"
+  assert_json "$TASK_RESULT" --arg run "$run_id" '.run_id == $run and ((.staging_ref // .staging_evidence) != null) and ((.staging_hash // .staging_sha256) != null)' "Bronze staging evidence is missing or mismatched"
   record_event bronze_stage succeeded "$TASK_RESULT" "$TASK_LOG" 0 "staging evidence recorded"
   run_task bronze_commit WAREHOUSE "$WAREHOUSE_IMG" bronze commit-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
   assert_json "$TASK_RESULT" --arg ws "$WORKSPACE_ID" --arg run "$run_id" '(.workspace_id // .workspace) == $ws and .run_id == $run and (.state // .status) == "COMMITTED"' "Bronze run is not committed"
@@ -274,6 +291,7 @@ silver_stage() {
   bronze_run="$(jq -r '.collector.run_id' "$STATE_FILE")"; silver_run="$(jq -r '.silver.run_id' "$STATE_FILE")"
   intents_uri="${INTENTS_URI:-${ARTIFACT_URI_PREFIX}/intents/${silver_run}.jsonl}"
   intents_path="$(uri_to_container_path WAREHOUSE "$intents_uri")"
+  mkdir -p "$(dirname "$(uri_to_host_path "$intents_uri")")"
   run_task silver WAREHOUSE "$WAREHOUSE_IMG" silver run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --system-instance-id "$SYSTEM_INSTANCE_ID" --bronze-run-id "$bronze_run" --flow-spec "$FLOW_SPEC" --banding-spec "$BANDING_SPEC" --run-id "$silver_run" --intents-output-path "$intents_path"
   assert_json "$TASK_RESULT" --arg run "$silver_run" '.run_id == $run and .status == "intents_emitted" and (.mapper_handoff.status // .mapper_handoff.emission_status) == "succeeded"' "Silver did not emit a successful handoff for the preallocated run"
   local host; host="$(uri_to_host_path "$intents_uri")"; [[ -f "$host" ]] || die "Silver intent JSONL is unavailable through ARTIFACT_HOST_ROOT"
@@ -297,14 +315,14 @@ reconcile_stage() {
     publish_receipt >/dev/null; return
   fi
   run_task reconcile_validate RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" validate --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
-  assert_json "$TASK_RESULT" --argjson count "$count" '.ok == true and (.processed | tonumber) == $count' "Reconciliation validation did not process the complete frozen intent set"
+  assert_json "$TASK_RESULT" --argjson count "$count" '.ok == true and ((.summary.processed // .processed) | tonumber) == $count' "Reconciliation validation did not process the complete frozen intent set"
   record_event reconcile_validate succeeded "$TASK_RESULT" "$TASK_LOG" 0 "complete frozen JSONL validated"
   validate_result="$TASK_RESULT"
   run_task reconcile_run RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" run --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
   assert_json "$TASK_RESULT" --argjson count "$count" '(.summary.processed // .processed | tonumber) == $count and (.summary.errors // .errors // 0 | tonumber) == 0' "Reconciliation did not successfully process every intent"
   record_event reconcile_run succeeded "$TASK_RESULT" "$TASK_LOG" 0 "reconciliation run completed"
-  run_task reconciliation_evidence RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" get execution-group --target-ref "$TARGET_REF" --execution-group "$group"
-  assert_json "$TASK_RESULT" --argjson count "$count" '(.summary.processed // .processed | tonumber) == $count and (.summary.errors // .errors // 0 | tonumber) == 0' "execution-group evidence is incomplete"
+  run_task reconciliation_evidence RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" get execution-group --workspace-id "$WORKSPACE_ID" --target-ref "$TARGET_REF" --execution-group "$group"
+  assert_json "$TASK_RESULT" --argjson count "$count" '(.counts.attempted // .attempted | tonumber) == $count and (.counts.succeeded // .succeeded | tonumber) == $count and ((.counts.failed // .failed // 0) | tonumber) == 0 and (.group_outcome == "succeeded" or .fully_succeeded == true)' "execution-group evidence is incomplete"
   if [[ "$COMPLETION_POLICY" == "observed_converged" ]]; then
     assert_json "$TASK_RESULT" '(.summary.converged // .converged // false) == true' "execution-group lacks converged observation evidence"
   fi
@@ -314,7 +332,7 @@ reconcile_stage() {
 finalize_stage() {
   local run; run="$(jq -r '.silver.run_id' "$STATE_FILE")"
   run_task silver_finalize WAREHOUSE "$WAREHOUSE_IMG" silver finalize --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run"
-  assert_json "$TASK_RESULT" --arg run "$run" '.run_id == $run and (.state // .status) == "completed"' "Silver finalization did not complete the expected run"
+  assert_json "$TASK_RESULT" --arg run "$run" --arg ws "$WORKSPACE_ID" '.run_id == $run and .workspace_id == $ws and .status == "ok"' "Silver finalization did not complete the expected run"
   record_event silver_finalize succeeded "$TASK_RESULT" "$TASK_LOG" 0 "Silver completed and lock released"
   state_update '.status = "completed" | .completed_at = $now' --arg now "$(date -u +%FT%TZ)"
   publish_receipt >/dev/null

@@ -37,10 +37,13 @@ this removes the stopped container, not the image cache.
 Receipts keep allow-listed variable names and container mount destinations, but
 redact environment values, host-side mount sources, and runtime arguments.
 
-The driver expects collector JSON to expose `run_id`, `report.uri`,
-`report.status`, and `manifest.uri`. Artifact URIs must begin with
-`ARTIFACT_URI_PREFIX`, which maps to `ARTIFACT_HOST_ROOT` for hashing and to a
-separate per-tool container path prefix through the declared volumes.
+The driver expects collector JSON to expose `run_id` and a successful report
+status. If the collector also prints `report.uri` and `manifest.uri`, those are
+used directly; otherwise the driver resolves `run.report.json` and
+`run.manifest.json` from `ARTIFACT_HOST_ROOT` using `run_id`. Artifact URIs
+must begin with `ARTIFACT_URI_PREFIX`, which maps to `ARTIFACT_HOST_ROOT` for
+hashing and to a separate per-tool container path prefix through the declared
+volumes.
 
 See [Import orchestration](import-orchestration.md) for the lifecycle,
 failure handling, recovery rules, and scheduler integration requirements.
