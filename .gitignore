@@ -25,6 +25,9 @@ terraform.tfvars
 *.auto.tfvars
 metabase/tf/provider-mirror
 
+# Testkit working dir (generated env files, artifacts, receipts)
+tmp/
+
 # Air-gap bundles (never commit)
 # Derived from images/manifest.txt via images/airgap/pull-and-save.sh — generate
 # on demand, ship, and discard. The manifest is the artifact worth versioning.

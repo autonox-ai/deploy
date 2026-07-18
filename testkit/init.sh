@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TESTKIT_ROOT="${TESTKIT_ROOT:-$ROOT/tmp/testkit}"
 SCENARIO="${1:-mock-hr}"
 SEED=0
@@ -10,7 +10,7 @@ SEED=0
 usage() {
   cat <<'EOF'
 Usage:
-  deploy/testkit/init.sh [scenario] [--seed]
+  testkit/init.sh [scenario] [--seed]
 
 Generates local warehouse/import env files under ./tmp/testkit by default.
 The default scenario is mock-hr.
@@ -36,13 +36,12 @@ need cat
 
 case "$SCENARIO" in
   mock-hr)
-    IMPORT_CONFIG_DIR="$ROOT/deploy/testkit/scenarios/mock-hr/config"
-    WAREHOUSE_CONFIG_DIR="$ROOT/deploy/testkit/scenarios/example/config"
-    SOURCE_SQL="$ROOT/deploy/testkit/scenarios/mock-hr/source/mock_hr.sql"
+    IMPORT_CONFIG_DIR="$ROOT/testkit/scenarios/mock-hr/config"
+    WAREHOUSE_CONFIG_DIR="$ROOT/testkit/scenarios/example/config"
     ;;
   example)
-    IMPORT_CONFIG_DIR="$ROOT/deploy/testkit/scenarios/example/config"
-    WAREHOUSE_CONFIG_DIR="$ROOT/deploy/testkit/scenarios/example/config"
+    IMPORT_CONFIG_DIR="$ROOT/testkit/scenarios/example/config"
+    WAREHOUSE_CONFIG_DIR="$ROOT/testkit/scenarios/example/config"
     ;;
   *)
     die "unknown scenario: $SCENARIO"
@@ -54,22 +53,44 @@ mkdir -p "$TESTKIT_ROOT/container-tmp"
 chmod -R a+rwX "$TESTKIT_ROOT/artifacts" || true
 
 image_tag() {
-  awk -v prefix="$1" '$0 ~ "^" prefix { print; exit }' "$ROOT/deploy/images/manifest.txt"
+  awk -v prefix="$1" '$0 ~ "^" prefix { print; exit }' "$ROOT/images/manifest.txt"
 }
 
+# Resolve an image to the most pinned reference available locally, pulling only
+# if it is absent. Air-gapped hosts have images pre-loaded by images/airgap and
+# no registry to reach, so a pull must never be the first move.
+#
+# Images restored from a `docker save` tar carry no RepoDigests — the registry
+# digest does not survive the round trip — so fall back to the manifest tag.
+# That is still pinned by images/manifest.txt, and bundle.lock is what verifies
+# the bytes on the air-gap path.
 image_digest() {
-  local image="$1"
-  docker pull --platform linux/amd64 "$image" >/dev/null
-  docker image inspect --format '{{index .RepoDigests 0}}' "$image"
+  local image="$1" digest=""
+
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    if [[ "${TESTKIT_OFFLINE:-0}" == "1" ]]; then
+      die "image not present locally and TESTKIT_OFFLINE=1: $image (load it with images/airgap/load.sh)"
+    fi
+    printf 'pull  %s\n' "$image" >&2
+    docker pull --platform linux/amd64 "$image" >/dev/null
+  fi
+
+  digest="$(docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$image" 2>/dev/null || true)"
+  if [[ -n "$digest" ]]; then
+    printf '%s\n' "$digest"
+  else
+    printf 'note: %s has no registry digest (loaded from a tar?) — using the manifest tag\n' "$image" >&2
+    printf '%s\n' "$image"
+  fi
 }
 
 WAREHOUSE_IMAGE_TAG="$(image_tag 'ghcr\.io/autonox-ai/autonox-warehouse:')"
 COLLECTOR_IMAGE_TAG="$(image_tag 'ghcr\.io/autonox-ai/collectors:')"
 RECONCILE_IMAGE_TAG="$(image_tag 'ghcr\.io/autonox-ai/reconciliation:')"
 
-[[ -n "$WAREHOUSE_IMAGE_TAG" ]] || die "warehouse image tag not found in deploy/images/manifest.txt"
-[[ -n "$COLLECTOR_IMAGE_TAG" ]] || die "collectors image tag not found in deploy/images/manifest.txt"
-[[ -n "$RECONCILE_IMAGE_TAG" ]] || die "reconciliation image tag not found in deploy/images/manifest.txt"
+[[ -n "$WAREHOUSE_IMAGE_TAG" ]] || die "warehouse image tag not found in images/manifest.txt"
+[[ -n "$COLLECTOR_IMAGE_TAG" ]] || die "collectors image tag not found in images/manifest.txt"
+[[ -n "$RECONCILE_IMAGE_TAG" ]] || die "reconciliation image tag not found in images/manifest.txt"
 
 WAREHOUSE_IMAGE="$(image_digest "$WAREHOUSE_IMAGE_TAG")"
 COLLECTOR_IMAGE="$(image_digest "$COLLECTOR_IMAGE_TAG")"
@@ -135,14 +156,11 @@ RECONCILE_CONTAINER_RUN_ARGS=$(printf '%q' "$reconcile_run_args")
 EOF
 
 printf 'Wrote:\n  %s\n  %s\n' "$TESTKIT_ROOT/warehouse.env" "$TESTKIT_ROOT/import.env"
-printf '\nNext:\n  ./deploy/testkit/run.sh reset\n  ./deploy/testkit/run.sh provision-workspace --workspace hello\n  export NOXOP_PASSWORD=local-noxop NOXREADER_PASSWORD=local-noxreader BIREADER_PASSWORD=local-bireader\n  docker exec -i nox-pg18 psql -U postgres -d postgres -v noxop_password=\"$NOXOP_PASSWORD\" -v noxreader_password=\"$NOXREADER_PASSWORD\" -v bireader_password=\"$BIREADER_PASSWORD\" < deploy/postgres/bootstrap/passwords.sql\n  ./deploy/testkit/run.sh migrate --warehouse-env %s/warehouse.env\n  ./deploy/testkit/run.sh import --env %s/import.env\n' "$TESTKIT_ROOT" "$TESTKIT_ROOT"
+printf '\nNext:\n  ./testkit/run.sh e2e %s\n' "$SCENARIO"
 
 if (( SEED )); then
   [[ "$SCENARIO" == mock-hr ]] || die "--seed is only supported for mock-hr"
-  printf '\nSeeding mock HR:\n  docker exec -i nox-pg18 psql -U postgres -d postgres < %s\n' "$SOURCE_SQL"
-  if docker inspect -f '{{.State.Health.Status}}' nox-pg18 >/dev/null 2>&1; then
-    docker exec -i nox-pg18 psql -U postgres -d postgres <"$SOURCE_SQL"
-  else
-    die "nox-pg18 is not running; start PostgreSQL first with ./deploy/testkit/run.sh up"
-  fi
+  # run.sh owns container resolution and lifecycle; do not duplicate it here.
+  printf '\nSeeding %s\n' "$SCENARIO"
+  "$ROOT/testkit/run.sh" seed "$SCENARIO"
 fi
