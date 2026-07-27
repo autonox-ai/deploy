@@ -11,7 +11,29 @@ instance instead.
 
 After the bootstrap runs, apply
 [`../bootstrap/passwords.sql`](../bootstrap/passwords.sql) with
-customer-managed secret values to set the AutoNox application role passwords.
+customer-managed secret values to set the AutoNox application role passwords,
+then [`../bootstrap/ws_setup.sql.tmpl`](../bootstrap/ws_setup.sql.tmpl) per
+workspace — a hard prerequisite for `workloads/warehouse`, which does not
+create workspace schemas itself.
+
+Both scripts' own headers show the generic `psql "$PG_ADMIN_URL"` form for an
+externally-reachable instance. On this StatefulSet, Postgres is only reachable
+from inside the cluster, so apply them against the running pod instead
+(`$PG_ADMIN_USER` is whatever `POSTGRES_USER` you set in the `pgvector-db`
+secret):
+
+```bash
+oc exec -i pgvector-0 -- psql -U "$PG_ADMIN_USER" -d autonox \
+  -v noxop_password="$NOXOP_PASSWORD" \
+  -v noxreader_password="$NOXREADER_PASSWORD" \
+  -v bireader_password="$BIREADER_PASSWORD" \
+  < ../bootstrap/passwords.sql
+
+WS_NAME=prod envsubst < ../bootstrap/ws_setup.sql.tmpl > ws_prod_setup.sql
+oc exec -i pgvector-0 -- psql -U "$PG_ADMIN_USER" -d autonox < ws_prod_setup.sql
+```
+
+Replace `oc` with `kubectl` on plain Kubernetes.
 
 ## What you get
 

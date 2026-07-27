@@ -37,8 +37,9 @@ cd postgres/compose
 cp .env.example .env
 ```
 
-Defaults are intentionally simple for POCs. Set `POSTGRES_PASSWORD` to a
-customer-managed secret before starting the container.
+**Required:** set `POSTGRES_PASSWORD` in `.env` to a real, customer-managed
+secret. It ships empty on purpose — no baked-in secrets — and `docker compose
+up` will refuse to start until it's set.
 
 ### 3. Start PostgreSQL
 
@@ -89,10 +90,24 @@ Port is always `5432`.
 
 ## Next step
 
-Once PostgreSQL is running, continue with:
+PostgreSQL and application role passwords are done above. Continue, per
+workspace and in order:
 
-1. Application role passwords via [`../bootstrap/passwords.sql`](../bootstrap/passwords.sql)
-2. Workspace provisioning via [`../bootstrap/ws_setup.sql.tmpl`](../bootstrap/ws_setup.sql.tmpl)
+1. Workspace schema via [`../bootstrap/ws_setup.sql.tmpl`](../bootstrap/ws_setup.sql.tmpl)
+   — admin-run, creates the `ws_<name>` schema and grants. A hard prerequisite
+   for step 2: `workloads/warehouse` does not create workspace schemas itself.
+
+   The template's own header shows the generic `psql "$PG_ADMIN_URL"` form for
+   an externally-reachable instance (mode 2). For this Compose container,
+   generate the file on the host, then apply it inside the container instead:
+
+   ```bash
+   WS_NAME=prod envsubst < ../bootstrap/ws_setup.sql.tmpl > ws_prod_setup.sql
+   docker exec -i nox-pg18 psql -U postgres -d autonox < ws_prod_setup.sql
+   ```
+2. Warehouse migrations via [`../../workloads/warehouse/README.md`](../../workloads/warehouse/README.md)
+   — runs as `noxop`, creates tables inside the schema from step 1.
+3. Import via [`../../workloads/import/README.md`](../../workloads/import/README.md)
 
 The authoritative flow is in [`../README.md`](../README.md).
 
