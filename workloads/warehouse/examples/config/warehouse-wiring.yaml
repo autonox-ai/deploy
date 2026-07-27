@@ -1,0 +1,22 @@
+$schema: https://autonox.ai/schemas/warehouse/runtime.config.spec.v1.schema.json
+kind: warehouse.runtime.config.spec.v1
+metadata:
+  name: warehouse
+spec:
+  workspace_id: prod
+  control_plane:
+    kind: postgres
+    schema: warehouse
+    database:
+      provider: env
+      ref: WAREHOUSE_POSTGRES_DSN
+  artifact_store:
+    kind: file
+  bronze: {}
+  silver: {}
+  canonical_store:
+    kind: postgres
+    shared_schema: shared
+    database:
+      provider: env
+      ref: WAREHOUSE_POSTGRES_DSN

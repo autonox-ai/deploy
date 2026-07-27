@@ -9,6 +9,43 @@ It does **not** create PostgreSQL itself, roles, passwords, base schemas, or
 workspace schemas. Those prerequisites are owned by
 [`../../postgres/README.md`](../../postgres/README.md) and its bootstrap SQL.
 
+## Quickstart (against `postgres/compose`)
+
+Assumes you already ran `postgres/compose` end to end: container up, role
+passwords set, and `ws_setup.sql.tmpl` applied with `WS_NAME=prod`. Reuses
+`NOXOP_PASSWORD` from that setup.
+
+```bash
+cd workloads/warehouse
+
+export NOXOP_PASSWORD='<the password you set in postgres/compose step 5>'
+
+# For this local walkthrough only: reuse the repo's current manifest pin. A
+# real customer environment must set WAREHOUSE_IMAGE explicitly instead — see
+# Inputs below.
+export WAREHOUSE_IMAGE="$(awk '/^ghcr\.io\/autonox-ai\/autonox-warehouse:/ { print; exit }' ../../images/manifest.txt)"
+
+mkdir -p config
+cp examples/config/warehouse-wiring.yaml examples/config/warehouse-canonical-wiring.yaml config/
+
+cat <<EOF > .env
+CONTAINER_RUNTIME=docker
+CONTAINER_NETWORK=autonox-local
+WAREHOUSE_PLATFORM=linux/amd64
+WAREHOUSE_IMAGE=${WAREHOUSE_IMAGE}
+WAREHOUSE_CONFIG_DIR=./config
+WAREHOUSE_WIRING_PATH=/config/warehouse-wiring.yaml
+WAREHOUSE_CANONICAL_WIRING_PATH=/config/warehouse-canonical-wiring.yaml
+WAREHOUSE_POSTGRES_DSN="postgresql://noxop:${NOXOP_PASSWORD}@postgres:5432/autonox"
+WAREHOUSE_CANONICAL_SHARED_SCHEMA=shared
+WORKSPACE_ID=prod
+EOF
+
+./run.sh upgrade-workspace
+```
+
+Different workspace name, PG mode, or wiring? See **Inputs** below.
+
 ## Lifecycle
 
 For each workspace, the normal initialization/upgrade sequence is:
@@ -29,6 +66,9 @@ PostgreSQL according to the customer operating procedure.
 
 ## Inputs
 
+Used the Quickstart above? It already sets everything below. This section is
+for other PG modes, workspace names, or custom wiring.
+
 Copy `.env.example` to `.env` and set environment-specific values. The runner
 loads it locally but passes only the declared Warehouse variables into the
 container.
@@ -38,15 +78,19 @@ Place the existing full and canonical wiring documents in `WAREHOUSE_CONFIG_DIR`
 paths with `WAREHOUSE_WIRING_PATH` and `WAREHOUSE_CANONICAL_WIRING_PATH`.
 Wiring remains the source of truth; this workload does not duplicate it.
 
-The runner resolves `autonox-warehouse` from
-[`../../images/manifest.txt`](../../images/manifest.txt). Set `WAREHOUSE_IMAGE`
-only for an approved registry rewrite or pinned override.
+For the shape of both documents, see the minimal working pair (single-Postgres
+control plane, file artifact store) at
+[`examples/config/`](examples/config/), used by the Quickstart above. Copy
+them as a starting point and adjust `workspace_id` and any customer-specific
+wiring (secrets providers, non-file artifact stores, etc.).
 
-Use `CONTAINER_RUNTIME=docker` or `CONTAINER_RUNTIME=podman`. For a customer
-network, set `CONTAINER_NETWORK`; for SELinux volume labeling, set
-`CONTAINER_MOUNT_SUFFIX=:Z`. Neither is required by the workload contract.
-When using the currently published AMD64-only images from Apple Silicon, set
-`WAREHOUSE_PLATFORM=linux/amd64` and ensure Docker emulation is enabled.
+`WAREHOUSE_IMAGE` is required — the exact `autonox-warehouse` reference pinned
+for this customer environment. There is no repo-wide default: each environment
+upgrades on its own cadence, so [`../../images/manifest.txt`](../../images/manifest.txt)
+cannot be authoritative for what a given deployment is actually running.
+
+Runtime tuning (podman, SELinux mounts, Apple Silicon emulation) is documented
+inline in `.env.example`.
 
 ## Run
 

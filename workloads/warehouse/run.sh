@@ -43,17 +43,7 @@ require_var() {
   fi
 }
 
-resolve_image() {
-  if [[ -n "${WAREHOUSE_IMAGE:-}" ]]; then
-    printf '%s\n' "${WAREHOUSE_IMAGE}"
-    return
-  fi
-  local manifest="${SCRIPT_DIR}/../../images/manifest.txt"
-  awk '/^ghcr\.io\/autonox-ai\/autonox-warehouse:/ { print; exit }' "${manifest}"
-}
-
-WAREHOUSE_IMAGE="$(resolve_image)"
-: "${WAREHOUSE_IMAGE:?could not resolve autonox-warehouse image from images/manifest.txt}"
+: "${WAREHOUSE_IMAGE:?set WAREHOUSE_IMAGE to the autonox-warehouse image pinned for this customer environment}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 CONTAINER_NETWORK="${CONTAINER_NETWORK:-}"
 CONTAINER_MOUNT_SUFFIX="${CONTAINER_MOUNT_SUFFIX:-}"
