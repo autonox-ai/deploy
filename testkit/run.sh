@@ -15,8 +15,14 @@ PG_CONTAINER=""
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"; }
 
+# The superuser password is a fixture, like the role passwords below: this is a
+# throwaway database the harness destroys on every reset. Supplying it here
+# keeps the testkit self-contained — real deployments pass --env-file pointing
+# at $AUTONOX_HOME/postgres.env, and the compose spec refuses to start without
+# one or the other.
 compose() {
-  "${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
+  POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-local-postgres}" \
+    "${COMPOSE_CMD[@]}" -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 
 select_compose() {
@@ -33,10 +39,24 @@ select_compose() {
 # name. compose.yaml pins container_name: nox-pg18, so that name does not follow
 # TESTKIT_COMPOSE_PROJECT — asking Compose keeps the two from disagreeing, and
 # keeps working if the pinned name is ever dropped.
+#
+# TESTKIT_PG_CONTAINER points the SQL steps at a PostgreSQL the harness does
+# not own, so a scenario can be driven against an existing deployment:
+#
+#   TESTKIT_PG_CONTAINER=nox-pg18 testkit/run.sh seed mock-hr
+#
+# Only up/down/reset/e2e manage lifecycle; every other command just needs a
+# container it can exec psql in.
 pg_container() {
   if [[ -z "$PG_CONTAINER" ]]; then
-    PG_CONTAINER="$(compose ps -q postgres 2>/dev/null | head -1)"
-    [[ -n "$PG_CONTAINER" ]] || die "postgres container is not running; start it with: $0 up"
+    if [[ -n "${TESTKIT_PG_CONTAINER:-}" ]]; then
+      docker inspect "$TESTKIT_PG_CONTAINER" >/dev/null 2>&1 \
+        || die "TESTKIT_PG_CONTAINER does not exist: $TESTKIT_PG_CONTAINER"
+      PG_CONTAINER="$TESTKIT_PG_CONTAINER"
+    else
+      PG_CONTAINER="$(compose ps -q postgres 2>/dev/null | head -1)"
+      [[ -n "$PG_CONTAINER" ]] || die "postgres container is not running; start it with: $0 up (or set TESTKIT_PG_CONTAINER)"
+    fi
   fi
   printf '%s\n' "$PG_CONTAINER"
 }
@@ -62,7 +82,7 @@ wait_for_postgres() {
 usage() {
   cat <<'EOF'
 Usage:
-  testkit/run.sh e2e [scenario] [--workspace <name>]
+  testkit/run.sh e2e [scenario]
   testkit/run.sh up
   testkit/run.sh down
   testkit/run.sh reset
@@ -78,6 +98,7 @@ Usage:
 Commands:
   e2e       Whole run: reset, provision, passwords, seed, migrate, import,
             assert. Expects init.sh to have generated the env files first.
+            The workspace comes from the scenario's scenario.env.
             Default scenario: mock-hr.
   up        Start the test PostgreSQL environment.
   down      Stop it while retaining the test volume.
@@ -93,8 +114,27 @@ Commands:
 EOF
 }
 
+# The scenario manifest is the single source of truth for the workspace name.
+# init.sh writes it into the generated env files from the same file, so the
+# provisioned schema and the env the images read cannot drift.
+scenario_workspace() {
+  local scenario="$1"
+  # Declared separately: a single `local` evaluates every right-hand side
+  # before assigning, so $scenario would still be empty here.
+  local env_file="$SCENARIO_DIR/$scenario/scenario.env"
+  [[ -f "$env_file" ]] || die "scenario is missing scenario.env: $env_file"
+  local workspace
+  workspace="$(
+    # shellcheck disable=SC1090
+    source "$env_file" && printf '%s\n' "${WORKSPACE_ID:-}"
+  )"
+  [[ -n "$workspace" ]] || die "$env_file does not set WORKSPACE_ID"
+  printf '%s\n' "$workspace"
+}
+
 run_e2e() {
-  local scenario="$1" workspace="$2"
+  local scenario="$1"
+  local workspace; workspace="$(scenario_workspace "$scenario")"
   local warehouse_env="$TESTKIT_ROOT/warehouse.env"
   local import_env="$TESTKIT_ROOT/import.env"
 
@@ -205,15 +245,10 @@ main() {
       ;;
     e2e)
       shift
-      local scenario="mock-hr" workspace="hello"
+      local scenario="mock-hr"
       if [[ $# -gt 0 && "$1" != --* ]]; then scenario="$1"; shift; fi
-      while [[ $# -gt 0 ]]; do
-        case "$1" in
-          --workspace) workspace="${2:?missing value for --workspace}"; shift 2 ;;
-          *) die "unexpected e2e argument: $1" ;;
-        esac
-      done
-      run_e2e "$scenario" "$workspace"
+      [[ $# -eq 0 ]] || die "unexpected e2e argument: $1"
+      run_e2e "$scenario"
       ;;
     set-passwords)
       shift; [[ $# -eq 0 ]] || die "set-passwords takes no arguments"

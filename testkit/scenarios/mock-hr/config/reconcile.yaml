@@ -15,7 +15,7 @@ secrets_providers:
 group_policy:
   minimum_guarantee: none
 target_mapping:
-  warehouse/ws_hello:
+  warehouse/ws_prod:
     target_kind: warehouse
     materialization_spec_ref: materialize.warehouse.v1/mock-hr/default
     connection_ref: connection.warehouse.postgres.v1/warehouse-target/default

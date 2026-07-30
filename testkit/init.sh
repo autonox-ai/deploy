@@ -4,7 +4,6 @@ IFS=$'\n\t'
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TESTKIT_ROOT="${TESTKIT_ROOT:-$ROOT/tmp/testkit}"
-SCENARIO="${1:-mock-hr}"
 SEED=0
 
 usage() {
@@ -14,39 +13,74 @@ Usage:
 
 Generates local warehouse/import env files under ./tmp/testkit by default.
 The default scenario is mock-hr.
+
+A scenario is a directory under testkit/scenarios/ containing scenario.env
+(identity and run shape), config/ (the documents import.sh consumes),
+source/*.sql (seed data), and optionally expect.sql (outcome assertions).
 EOF
 }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 2; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"; }
 
-[[ "${1:-}" != "-h" && "${1:-}" != "--help" ]] || { usage; exit 0; }
-
-if [[ "${2:-}" == "--seed" ]]; then
-  SEED=1
-elif [[ -n "${2:-}" ]]; then
-  die "unexpected argument: $2"
-fi
-[[ -n "$SCENARIO" ]] || die "scenario is required"
+SCENARIO=""
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --seed)    SEED=1 ;;
+    -*)        die "unexpected argument: $arg" ;;
+    *)
+      [[ -z "$SCENARIO" ]] || die "unexpected argument: $arg"
+      SCENARIO="$arg"
+      ;;
+  esac
+done
+SCENARIO="${SCENARIO:-mock-hr}"
 
 need docker
 need awk
 need mkdir
 need cat
 
-case "$SCENARIO" in
-  mock-hr)
-    IMPORT_CONFIG_DIR="$ROOT/testkit/scenarios/mock-hr/config"
-    WAREHOUSE_CONFIG_DIR="$ROOT/testkit/scenarios/example/config"
-    ;;
-  example)
-    IMPORT_CONFIG_DIR="$ROOT/testkit/scenarios/example/config"
-    WAREHOUSE_CONFIG_DIR="$ROOT/testkit/scenarios/example/config"
-    ;;
-  *)
-    die "unknown scenario: $SCENARIO"
-    ;;
-esac
+# A scenario is a directory, not a case branch: adding one must not require
+# editing the harness. run.sh discovers seeds and assertions the same way.
+SCENARIO_DIR="$ROOT/testkit/scenarios/$SCENARIO"
+[[ -d "$SCENARIO_DIR" ]] || die "unknown scenario: $SCENARIO (expected $SCENARIO_DIR)"
+
+SCENARIO_ENV="$SCENARIO_DIR/scenario.env"
+[[ -f "$SCENARIO_ENV" ]] || die "scenario is missing scenario.env: $SCENARIO_ENV"
+set -a
+# shellcheck disable=SC1090
+source "$SCENARIO_ENV"
+set +a
+
+for var in WORKSPACE_ID SYSTEM_INSTANCE_ID TENANT_ID ENVIRONMENT TARGET_REF COMPLETION_POLICY; do
+  [[ -n "${!var:-}" ]] || die "$SCENARIO_ENV does not set $var"
+done
+
+# Same fixture default as run.sh set-passwords; override to point the
+# generated env files at an existing database whose noxop password differs.
+NOXOP_PASSWORD="${NOXOP_PASSWORD:-local-noxop}"
+PG_HOST="${TESTKIT_PG_HOST:-postgres}"
+NOXOP_DSN="postgresql://noxop:${NOXOP_PASSWORD}@${PG_HOST}:5432/autonox"
+
+CONFIG_DIR="$SCENARIO_DIR/config"
+[[ -d "$CONFIG_DIR" ]] || die "scenario is missing config/: $CONFIG_DIR"
+
+# Every scenario is self-contained — no borrowing config from a sibling.
+IMPORT_CONFIG_DIR="$CONFIG_DIR"
+WAREHOUSE_CONFIG_DIR="$CONFIG_DIR"
+
+for f in collector.yaml connections.yaml flow.yaml banding.yaml reconcile.yaml \
+         warehouse-wiring.yaml warehouse-canonical-wiring.yaml; do
+  [[ -f "$CONFIG_DIR/$f" ]] || die "scenario config is missing $f: $CONFIG_DIR/$f"
+done
+
+# WORKSPACE_ID lives in scenario.env, but the warehouse wiring carries its own
+# copy that the image reads. Fail loudly rather than run a mismatched pair.
+wiring_workspace="$(awk '/^[[:space:]]*workspace_id:/ { print $2; exit }' "$CONFIG_DIR/warehouse-wiring.yaml")"
+[[ "$wiring_workspace" == "$WORKSPACE_ID" ]] || die \
+  "workspace mismatch: scenario.env WORKSPACE_ID=$WORKSPACE_ID but warehouse-wiring.yaml workspace_id=${wiring_workspace:-<unset>}"
 
 mkdir -p "$TESTKIT_ROOT/artifacts" "$TESTKIT_ROOT/receipts"
 mkdir -p "$TESTKIT_ROOT/container-tmp"
@@ -112,18 +146,18 @@ WAREHOUSE_IMAGE=$WAREHOUSE_IMAGE
 WAREHOUSE_CONFIG_DIR=$WAREHOUSE_CONFIG_DIR
 WAREHOUSE_WIRING_PATH=/config/warehouse-wiring.yaml
 WAREHOUSE_CANONICAL_WIRING_PATH=/config/warehouse-canonical-wiring.yaml
-WAREHOUSE_POSTGRES_DSN=postgresql://noxop:local-noxop@postgres:5432/autonox
-WORKSPACE_ID=hello
+WAREHOUSE_POSTGRES_DSN=$NOXOP_DSN
+WORKSPACE_ID=$WORKSPACE_ID
 EOF
 
 cat > "$TESTKIT_ROOT/import.env" <<EOF
-TENANT_ID=local
-ENVIRONMENT=test
-WORKSPACE_ID=hello
-SYSTEM_INSTANCE_ID=mock-hr
-TARGET_REF=warehouse/ws_hello
+TENANT_ID=$TENANT_ID
+ENVIRONMENT=$ENVIRONMENT
+WORKSPACE_ID=$WORKSPACE_ID
+SYSTEM_INSTANCE_ID=$SYSTEM_INSTANCE_ID
+TARGET_REF=$TARGET_REF
 CONTAINER_RUNTIME=docker
-COMPLETION_POLICY=none
+COMPLETION_POLICY=$COMPLETION_POLICY
 COLLECTOR_IMG=$COLLECTOR_IMAGE
 WAREHOUSE_IMG=$WAREHOUSE_IMAGE
 RECONCILE_IMG=$RECONCILE_IMAGE
@@ -140,8 +174,8 @@ WAREHOUSE_WIRING=$WAREHOUSE_CONFIG_DIR/warehouse-wiring.yaml
 FLOW_SPEC=$IMPORT_CONFIG_DIR/flow.yaml
 BANDING_SPEC=$IMPORT_CONFIG_DIR/banding.yaml
 RECONCILE_WIRING=$IMPORT_CONFIG_DIR/reconcile.yaml
-POSTGRES_DSN=postgresql://noxop:local-noxop@postgres:5432/autonox
-WAREHOUSE_POSTGRES_DSN=postgresql://noxop:local-noxop@postgres:5432/autonox
+POSTGRES_DSN=$NOXOP_DSN
+WAREHOUSE_POSTGRES_DSN=$NOXOP_DSN
 RECONCILE_POSTGRES_DSN=\$WAREHOUSE_POSTGRES_DSN
 RECONCILE_WAREHOUSE_DSN=\$WAREHOUSE_POSTGRES_DSN
 COLLECTOR_CONTAINER_ENV_NAMES=POSTGRES_DSN
@@ -159,8 +193,8 @@ printf 'Wrote:\n  %s\n  %s\n' "$TESTKIT_ROOT/warehouse.env" "$TESTKIT_ROOT/impor
 printf '\nNext:\n  ./testkit/run.sh e2e %s\n' "$SCENARIO"
 
 if (( SEED )); then
-  [[ "$SCENARIO" == mock-hr ]] || die "--seed is only supported for mock-hr"
   # run.sh owns container resolution and lifecycle; do not duplicate it here.
+  # It also validates that the scenario actually ships seed data.
   printf '\nSeeding %s\n' "$SCENARIO"
   "$ROOT/testkit/run.sh" seed "$SCENARIO"
 fi

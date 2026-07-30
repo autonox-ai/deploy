@@ -8,11 +8,33 @@ does not reimplement PostgreSQL or Warehouse setup:
 3. An import is executed through `workloads/import/import.sh`.
 4. The resulting state is asserted with the scenario's `expect.sql`.
 
-The harness is scenario-driven. Each scenario supplies source data, the config
-`import.sh` consumes, and its expected outcome; the harness supplies lifecycle,
-migration, and assertion commands.
+The harness is scenario-driven. Each scenario supplies its identity, source
+data, the config `import.sh` consumes, and its expected outcome; the harness
+supplies lifecycle, migration, and assertion commands.
 
 Paths below are relative to the repo root. Run the scripts from there.
+
+## Adding a scenario
+
+A scenario is a directory under `scenarios/`. Both scripts discover it from
+the filesystem, so adding one is never a harness edit:
+
+```
+scenarios/<name>/
+├── scenario.env   # required — WORKSPACE_ID, SYSTEM_INSTANCE_ID, TENANT_ID,
+│                  #   ENVIRONMENT, TARGET_REF, COMPLETION_POLICY
+├── config/        # required — collector, connections, flow, banding,
+│                  #   reconcile, warehouse-wiring, warehouse-canonical-wiring
+├── source/*.sql   # seed data, loaded in filename order
+└── expect.sql     # optional outcome assertions
+```
+
+`init.sh` validates all of the above before writing anything, including that
+`WORKSPACE_ID` matches `spec.workspace_id` in `config/warehouse-wiring.yaml`.
+
+Scenarios are self-contained — none reads another's config. `templates/` holds
+reference wiring and annotated `*.env.example` files to copy from; it is not a
+scenario and cannot be run.
 
 ## Usage
 
@@ -30,6 +52,25 @@ The individual steps remain available (`up`, `down`, `reset`,
 `provision-workspace`, `set-passwords`, `seed`, `migrate`, `import`, `assert`,
 `status`, `scenario`); run `./testkit/run.sh` with no arguments for the list.
 
+### Against an existing PostgreSQL
+
+Only `up`, `down`, `reset`, and `e2e` manage lifecycle. To run a scenario
+against a database the harness does not own — an existing `postgres/compose`
+instance, say — name its container and skip those:
+
+```bash
+export TESTKIT_PG_CONTAINER=nox-pg18
+NOXOP_PASSWORD='<that instance's noxop password>' ./testkit/init.sh mock-hr
+./testkit/run.sh provision-workspace --workspace hello
+./testkit/run.sh seed mock-hr
+./testkit/run.sh migrate --warehouse-env ./tmp/testkit/warehouse.env
+./testkit/run.sh import --env ./tmp/testkit/import.env
+./testkit/run.sh assert mock-hr
+```
+
+Assertions in `expect.sql` assume the scenario's own data, so run them against
+a workspace nothing else is writing to.
+
 ### Credentials
 
 The harness sets the local test-role passwords itself (`set-passwords`, folded
@@ -37,6 +78,11 @@ into `e2e`). These are fixtures, not credentials — the same values are already
 written into the env files `init.sh` generates, so having the harness own the
 step keeps the two from drifting. Override with `NOXOP_PASSWORD`,
 `NOXREADER_PASSWORD`, `BIREADER_PASSWORD`.
+
+The PostgreSQL superuser password is a fixture for the same reason: the test
+database is destroyed on every `reset`. Override with `POSTGRES_PASSWORD`. A
+real deployment instead passes `--env-file $AUTONOX_HOME/postgres.env`; the
+compose spec starts with neither.
 
 Real deployment configuration is still a customer input: the testkit does not
 invent wiring documents or connection catalogs.
@@ -81,6 +127,8 @@ case the manifest tag is used and a note is printed. The tag is still pinned by
 | `TESTKIT_OFFLINE` | `1` fails instead of pulling a missing image. |
 | `TESTKIT_POSTGRES_COMPOSE_FILE` | Use a different Compose file. |
 | `TESTKIT_COMPOSE_PROJECT` | Use a different Compose project. |
+| `TESTKIT_PG_CONTAINER` | Run the SQL steps against an existing PostgreSQL container instead of one the harness starts. |
+| `TESTKIT_PG_HOST` | Hostname used in the generated DSNs. Default `postgres`. |
 | `WAREHOUSE_ENV_FILE` | Warehouse env file for `migrate` when not passed explicitly. |
 
 The postgres container is resolved through Compose rather than by name, so it

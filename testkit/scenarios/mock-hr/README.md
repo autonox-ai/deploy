@@ -4,47 +4,34 @@ This scenario runs one mocked HR source, represented by PostgreSQL tables,
 through the real Collector, Warehouse, and Reconciliation containers via
 `import.sh`.
 
-The scenario is wired for the verified testkit path:
-
-- `TARGET_REF=warehouse/ws_hello`
-- `COMPLETION_POLICY=none`
-- `shared_schema=shared`
-
-Seed the mocked HR source into the test PostgreSQL database:
+## Run it
 
 ```bash
-SCENARIO="$PWD/deploy/testkit/scenarios/mock-hr"
-docker exec -i nox-pg18 psql -U postgres -d postgres \
-  < "$SCENARIO/source/mock_hr.sql"
+./testkit/init.sh mock-hr
+./testkit/run.sh e2e mock-hr
 ```
 
-Use this directory as `CONFIG_DIR` when generating the import environment:
+`e2e` resets PostgreSQL, provisions the workspace, sets the test-role
+passwords, seeds `source/mock_hr.sql`, migrates, imports, and asserts
+`expect.sql`. Nothing else needs to be exported.
 
-```bash
-CONFIG_DIR="$PWD/deploy/testkit/scenarios/mock-hr/config"
-SOURCE_DIR="$PWD/deploy/testkit/scenarios/mock-hr/source"
-TESTKIT_ROOT="$PWD/tmp/testkit"
-ARTIFACT_DIR="$TESTKIT_ROOT/artifacts"
-RECEIPT_DIR="$TESTKIT_ROOT/receipts"
-```
+## What the scenario supplies
 
-The source is already inside PostgreSQL; no source volume mount is required.
+| Path | Purpose |
+| --- | --- |
+| `scenario.env` | Identity and run shape — workspace, system instance, target ref, completion policy. Read by both `init.sh` and `run.sh`. |
+| `config/` | The documents `import.sh` consumes: collector, connections, flow, banding, reconcile, and the two warehouse wiring files. |
+| `source/mock_hr.sql` | The mocked HR tables, loaded into the test database. |
+| `expect.sql` | Outcome assertions, run against `autonox` after the import. |
 
-The generated import environment passes the PostgreSQL DSN into the Warehouse
-and Reconciliation containers, and points the reconciliation target at the
-warehouse binding that the runtime expects:
+The harness supplies everything else: image resolution from
+`images/manifest.txt`, container mounts and run args, artifact and receipt
+directories, and the PostgreSQL DSNs.
 
-```bash
-WAREHOUSE_POSTGRES_DSN=postgresql://noxop:local-noxop@postgres:5432/autonox
-RECONCILE_POSTGRES_DSN="$WAREHOUSE_POSTGRES_DSN"
-RECONCILE_WAREHOUSE_DSN="$WAREHOUSE_POSTGRES_DSN"
-TARGET_REF=warehouse/ws_hello
-COMPLETION_POLICY=none
-WAREHOUSE_WIRING="$PWD/deploy/testkit/scenarios/example/config/warehouse-wiring.yaml"
-WAREHOUSE_CONTAINER_ENV_NAMES=WAREHOUSE_POSTGRES_DSN
-RECONCILE_CONTAINER_ENV_NAMES=$'RECONCILE_POSTGRES_DSN\nRECONCILE_WAREHOUSE_DSN'
-COLLECTOR_CONTAINER_ENV_NAMES=POSTGRES_DSN
-```
+## Notes
 
-`./deploy/testkit/init.sh mock-hr --seed` writes the exact env files used by
-the verified flow under `./tmp/testkit`.
+The source lives inside PostgreSQL, so the collector reaches it over the
+`autonox-local` network and no source volume mount is required.
+
+`WORKSPACE_ID` in `scenario.env` must match `spec.workspace_id` in
+`config/warehouse-wiring.yaml`; `init.sh` fails the run if they drift.
