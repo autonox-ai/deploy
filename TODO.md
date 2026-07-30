@@ -82,6 +82,19 @@ an older image and surfaces three steps later as
 a missing migration rather than a version skew. Worth a note in
 `workloads/warehouse/README.md`, or a check in the runner.
 
+### 6b. The warehouse workload names the workspace twice
+
+`WORKSPACE_ID` in the env file and `spec.workspace_id` in
+`warehouse-config/warehouse-wiring.yaml` must agree, and nothing checks it. The
+canonical steps take `--workspace-id` from the env file while `migrate` reads
+the wiring, so a mismatch is silent: it only bites if a later migration scopes
+anything by the wiring's value.
+
+`workloads/warehouse/README.md` says to copy `examples/config/` and "adjust
+`workspace_id`", which is exactly the duplication the testkit removed by
+rendering `${WORKSPACE_ID}` (`testkit/init.sh`). Either template the wiring the
+same way, or have `run.sh` refuse to run when the two disagree.
+
 ### 7. `container_name: nox-pg18` is daemon-global
 
 `postgres/compose/compose.yaml:5` pins it, so `TESTKIT_COMPOSE_PROJECT` cannot
