@@ -4,20 +4,32 @@ metadata:
   name: mock-hr
 spec:
   matching:
+    # Source name, not the system_instance_id: the schema requires ^[a-z][a-z0-9_]*$,
+    # and it must match the `source` that flow.yaml stamps on canonical rows.
     banding_attributes:
       mock_hr: employee_id
-    account_identity_attributes:
-      mock_hr:
-        account_attribute: employee_id
+    # No account_identity_attributes: this source emits no accounts, so there
+    # is nothing to correlate back to an identity.
   attribute_merge:
     partitions:
-      output:
+      columns:
         identity_kind:
           pipe:
             - const: human
         primary_hr_key: sources.mock_hr.employee_id
         display_name:
-          - sources.mock_hr.employee_id
+          pipe:
+            - collect:
+                - sources.mock_hr.first_name
+                - sources.mock_hr.last_name
+            - join:
+                separator: ' '
+        first_name:
+          - sources.mock_hr.first_name
+        last_name:
+          - sources.mock_hr.last_name
         email:
           - sources.mock_hr.email
-        core_attributes: sources.mock_hr
+        job_title:
+          - sources.mock_hr.job_title
+        attributes: sources.mock_hr

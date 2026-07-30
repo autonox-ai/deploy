@@ -2,23 +2,13 @@ kind: collector.postgres.v1
 metadata:
   name: mock-hr-collector
 spec:
-  system_instance_id: mock-hr
+  system_instance_id: mock_hr
   connection_ref: connection.postgres.v1/mock-hr
   streams:
-    - stream_id: accounts
-      kind: entity
-      object_type: mock_hr_account
-      mode: snapshot
-      record_identity:
-        primary_key:
-          fields:
-            - /source_key
-      extraction:
-        type: pg_query
-        sql: |
-          SELECT user_id AS source_key, username,
-                 json_build_object('employee_id', employee_id, 'email', email) AS account_attributes
-          FROM mock_hr.users ORDER BY user_id
+    # HR is an authoritative identity source: it asserts that a person exists.
+    # It deliberately emits no accounts — an HR record grants no access, and
+    # modelling it as one inflates bi_views.accounts and pollutes
+    # bi_views.orphaned_accounts. Accounts belong to target systems.
     - stream_id: identity_links
       kind: entity
       object_type: mock_hr_identity_link
@@ -31,5 +21,6 @@ spec:
         type: pg_query
         sql: |
           SELECT user_id AS source_key, 'worker' AS object_type,
-                 json_build_object('employee_id', employee_id) AS link_attributes
+                 employee_id, username, first_name, last_name,
+                 email, department, job_title
           FROM mock_hr.users ORDER BY user_id

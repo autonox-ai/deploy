@@ -10,22 +10,6 @@ spec:
       min_entities_threshold: 1
   mapper:
     mappings:
-      - raw_object_type: mock_hr_account
-        canonical_entity: account
-        spec:
-          partitions:
-            columns:
-              source_key: root.source_key
-              source:
-                pipe:
-                  - const: mock_hr
-              username: root.username
-              account_attributes: root.account_attributes
-              status:
-                pipe:
-                  - const: active
-        provenance:
-          content_hash_attributes: [source_key, username]
       - raw_object_type: mock_hr_identity_link
         canonical_entity: identity_source_link
         spec:
@@ -36,9 +20,16 @@ spec:
                 pipe:
                   - const: mock_hr
               object_type: root.object_type
-              link_attributes: root.link_attributes
               status:
                 pipe:
                   - const: active
+            attributes:
+              employee_id: root.employee_id
+              username: root.username
+              first_name: root.first_name
+              last_name: root.last_name
+              email: root.email
+              department: root.department
+              job_title: root.job_title
         provenance:
           content_hash_attributes: [source_key]
