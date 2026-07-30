@@ -82,18 +82,43 @@ an older image and surfaces three steps later as
 a missing migration rather than a version skew. Worth a note in
 `workloads/warehouse/README.md`, or a check in the runner.
 
-### 6b. The warehouse workload names the workspace twice
+### 6b. The warehouse workload names the workspace twice, and both are live
 
-`WORKSPACE_ID` in the env file and `spec.workspace_id` in
-`warehouse-config/warehouse-wiring.yaml` must agree, and nothing checks it. The
-canonical steps take `--workspace-id` from the env file while `migrate` reads
-the wiring, so a mismatch is silent: it only bites if a later migration scopes
-anything by the wiring's value.
+`WORKSPACE_ID` in the env file and `spec.workspace_id` in the warehouse wiring
+must agree, and nothing checks it. They are not alternatives — they feed
+different commands inside the same `upgrade-workspace` sequence.
 
-`workloads/warehouse/README.md` says to copy `examples/config/` and "adjust
-`workspace_id`", which is exactly the duplication the testkit removed by
-rendering `${WORKSPACE_ID}` (`testkit/init.sh`). Either template the wiring the
-same way, or have `run.sh` refuse to run when the two disagree.
+The image resolves workspace_id in three layers, later overriding earlier
+(`autonox/warehouse/cli.py`):
+
+```
+wiring spec.workspace_id                     base
+  ← WAREHOUSE_WORKSPACE_ID                   _parse_env_stage:289
+    ← --workspace-id                         _shared_overrides:299
+```
+
+It is required — `cli.py:518` raises `runtime.workspace_id.missing` when no
+layer supplies it. Which layer wins depends on the command:
+
+| `run.sh` step | Command | workspace_id from |
+| --- | --- | --- |
+| 1 | `migrate` | **the wiring** — no `--workspace-id` is passed |
+| 2 | `canonical migrate --shared` | shared, not workspace-scoped |
+| 3 | `canonical migrate --workspace-id <id>` | the flag |
+| 4 | `canonical install-access-layer --workspace-id <id>` | the flag |
+
+So step 1 runs with whatever the wiring says, and steps 3–4 with whatever the
+env file says. Observed in a rehearsal: wiring `prod`, env `local`. It passed
+only because runtime `migrate` creates the control-plane tables without writing
+workspace-scoped rows — the `workspace_id` columns are populated later, at
+import time, from a different (correct) wiring. The day a runtime migration
+scopes anything by that value — a partitioned table, a per-workspace index —
+the mismatch writes under the wrong workspace silently.
+
+`workloads/warehouse/README.md` still says to copy `examples/config/` and
+"adjust `workspace_id`", which is exactly the duplication the testkit removed
+by rendering `${WORKSPACE_ID}` (`testkit/init.sh`). Either template the wiring
+the same way, or have `run.sh` refuse to run when the two disagree.
 
 ### 7. `container_name: nox-pg18` is daemon-global
 
