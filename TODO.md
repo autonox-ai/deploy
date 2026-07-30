@@ -170,7 +170,49 @@ Drop the pin and resolve the container through Compose (`run.sh` already does).
   package has no release channel, only branch tags, unlike `collectors` and
   `reconciliation` which carry `enterprise`. Confirm that is intended.
 
-### 9. mock-hr is a smoke test, not a fixture
+### 9. Defaults that write inside this repo
+
+The repo is meant to be immutable — replaceable wholesale on an upgrade — but
+six paths default to writing into it. All are gitignored, so `git status` stays
+clean and the breakage is invisible until someone replaces the tree.
+
+| Path | Written by | Default that puts it here |
+| --- | --- | --- |
+| `tmp/testkit/receipts/` | `import.sh` via the testkit | `TESTKIT_ROOT=$ROOT/tmp/testkit` (`testkit/init.sh:6`, `run.sh:6`) |
+| `tmp/testkit/artifacts/` | collector/warehouse/reconcile | same |
+| `tmp/testkit/config/`, `*.env` | `testkit/init.sh` | same |
+| `workloads/warehouse/.env` | operator | `ENV_FILE="${WAREHOUSE_ENV_FILE:-${SCRIPT_DIR}/.env}"` (`run.sh:9`) |
+| `workloads/warehouse/config/` | operator | `WAREHOUSE_CONFIG_DIR="${…:-${SCRIPT_DIR}/config}"` (`run.sh:51`) |
+| `metabase/compose/.env` | operator | Compose's own `.env` beside the spec |
+| `tars/` | `images/airgap/pull-and-save.sh` | relative `./tars` (`load.sh:16`) |
+| `metabase/tf/provider-mirror/` | `terraform providers mirror` | `tf/provider-mirror` |
+
+Ranked by what actually hurts:
+
+1. **Receipts.** `import-orchestration.md` calls them the durable record of an
+   import and the only hand-off object between tasks — audit evidence. They
+   must not live in a tree that gets deleted on upgrade. Even in the testkit
+   they should default outside the repo.
+2. **`workloads/warehouse` defaults.** Both the env file and the config dir
+   default in-tree, so an operator who ignores the README puts customer config
+   and a DSN inside the vendor tree. The README now says to use
+   `WAREHOUSE_ENV_FILE`, but the default still leads the other way. Default to
+   `$AUTONOX_HOME` and fail with a clear message when unset.
+3. **`metabase/compose/.env`** — same as the postgres one already fixed; the
+   Compose `--env-file` treatment applies unchanged.
+4. **`tars/` and `provider-mirror/`** — large build outputs. Regenerable, so
+   losing them is cheap, but they still make the tree non-replaceable in place.
+
+Fix shape is the same one already applied to `postgres/compose` and
+`workloads/warehouse`'s documentation: default to `$AUTONOX_HOME`, keep
+generated output under `$AUTONOX_HOME/var/`, and never resolve a writable path
+relative to the script.
+
+Two stale leftovers exist right now from earlier runs and should be deleted:
+`workloads/warehouse/.env` (no `WAREHOUSE_IMAGE`, wrong password) and
+`metabase/compose/.env`.
+
+### 10. mock-hr is a smoke test, not a fixture
 
 One source, three identities, no accounts or entitlements. It cannot exercise
 banding *across* sources — the case where several accounts collapse into one
