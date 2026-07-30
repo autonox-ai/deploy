@@ -2,10 +2,10 @@ specs:
   - kind: connection.postgres.v1
     name: mock-hr
     scope: default
-    uri: file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/connection.mock-hr.yaml
+    uri: file://${CONFIG_DIR}/connection.mock-hr.yaml
     schema_id: https://autonox.ai/schemas/integrations/postgres/connection.v1
   - kind: connection.warehouse.postgres.v1
     name: warehouse-target
     scope: default
-    uri: file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/connection.warehouse.yaml
+    uri: file://${CONFIG_DIR}/connection.warehouse.yaml
     schema_id: https://autonox.ai/schemas/integrations/warehouse/connection.postgres.v1

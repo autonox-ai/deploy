@@ -1,8 +1,8 @@
 $schema: https://autonox.ai/schemas/reconciliation/wiring.spec.v1.schema.json
 materialization_catalog:
-  - file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/materialization.catalog.yaml
+  - file://${CONFIG_DIR}/materialization.catalog.yaml
 connection_catalog:
-  - file:///Users/asaf/dev/autonox/deploy/testkit/scenarios/mock-hr/config/connections.yaml
+  - file://${CONFIG_DIR}/connections.yaml
 control_plane_store:
   kind: postgres
   database:
@@ -15,7 +15,7 @@ secrets_providers:
 group_policy:
   minimum_guarantee: none
 target_mapping:
-  warehouse/ws_prod:
+  warehouse/ws_${WORKSPACE_ID}:
     target_kind: warehouse
     materialization_spec_ref: materialize.warehouse.v1/mock-hr/default
     connection_ref: connection.warehouse.postgres.v1/warehouse-target/default

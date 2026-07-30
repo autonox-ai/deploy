@@ -27,7 +27,7 @@ BEGIN
     RAISE EXCEPTION 'expected 0 accounts from an identity source, found %', n_accounts;
   END IF;
 
-  SELECT count(*) INTO n_links FROM ws_prod.identity_source_links;
+  SELECT count(*) INTO n_links FROM ws_${WORKSPACE_ID}.identity_source_links;
   IF n_links <> 3 THEN
     RAISE EXCEPTION 'expected 3 identity_source_links, found %', n_links;
   END IF;

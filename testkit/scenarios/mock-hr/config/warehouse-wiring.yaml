@@ -3,7 +3,7 @@ kind: warehouse.runtime.config.spec.v1
 metadata:
   name: testkit-mock-hr-warehouse
 spec:
-  workspace_id: prod
+  workspace_id: ${WORKSPACE_ID}
   control_plane:
     kind: postgres
     schema: warehouse

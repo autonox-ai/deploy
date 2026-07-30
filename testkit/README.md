@@ -29,8 +29,22 @@ scenarios/<name>/
 └── expect.sql     # optional outcome assertions
 ```
 
-`init.sh` validates all of the above before writing anything, including that
-`WORKSPACE_ID` matches `spec.workspace_id` in `config/warehouse-wiring.yaml`.
+`init.sh` validates all of the above before writing anything.
+
+`config/` is a template pack, not the config the containers see. Files may use
+`${WORKSPACE_ID}` and `${CONFIG_DIR}`; `init.sh` renders them into
+`$TESTKIT_ROOT/config` and mounts that. So the workspace name is written once,
+in `scenario.env`, and `file://` URIs resolve wherever the repo lives instead
+of being absolute paths baked into a committed file.
+
+That makes the workspace an override rather than a hardcode:
+
+```bash
+WORKSPACE_ID=local ./testkit/init.sh mock-hr
+```
+
+`expect.sql` is rendered the same way at assert time, so assertions follow the
+override. Whatever workspace you name must be provisioned and migrated first.
 
 Scenarios are self-contained — none reads another's config. `templates/` holds
 reference wiring and annotated `*.env.example` files to copy from; it is not a

@@ -198,7 +198,11 @@ run_assertions() {
     return 0
   fi
   printf '\n== asserting expected state (%s) ==\n' "$scenario"
-  psql_super -d autonox < "$expect"
+  # expect.sql may reference ws_${WORKSPACE_ID}; render it the same way init.sh
+  # renders the config pack, so assertions follow a workspace override.
+  local workspace; workspace="$(scenario_workspace "$scenario")"
+  command -v envsubst >/dev/null 2>&1 || die "required command is unavailable: envsubst"
+  WORKSPACE_ID="$workspace" envsubst '${WORKSPACE_ID}' < "$expect" | psql_super -d autonox
   printf 'assertions passed\n'
 }
 

@@ -64,23 +64,42 @@ NOXOP_PASSWORD="${NOXOP_PASSWORD:-local-noxop}"
 PG_HOST="${TESTKIT_PG_HOST:-postgres}"
 NOXOP_DSN="postgresql://noxop:${NOXOP_PASSWORD}@${PG_HOST}:5432/autonox"
 
-CONFIG_DIR="$SCENARIO_DIR/config"
-[[ -d "$CONFIG_DIR" ]] || die "scenario is missing config/: $CONFIG_DIR"
+SOURCE_CONFIG_DIR="$SCENARIO_DIR/config"
+[[ -d "$SOURCE_CONFIG_DIR" ]] || die "scenario is missing config/: $SOURCE_CONFIG_DIR"
+
+for f in collector.yaml connections.yaml flow.yaml banding.yaml reconcile.yaml \
+         warehouse-wiring.yaml warehouse-canonical-wiring.yaml; do
+  [[ -f "$SOURCE_CONFIG_DIR/$f" ]] || die "scenario config is missing $f: $SOURCE_CONFIG_DIR/$f"
+done
+
+# Render the config pack rather than mounting the repo copy. Scenario config
+# carries ${WORKSPACE_ID} and ${CONFIG_DIR} placeholders, so the workspace name
+# is written once in scenario.env and the file:// URIs resolve wherever the
+# repo happens to live. Rendering is also what keeps the tree read-only.
+need envsubst
+CONFIG_DIR="$TESTKIT_ROOT/config"
+rm -rf "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR"
+for f in "$SOURCE_CONFIG_DIR"/*; do
+  WORKSPACE_ID="$WORKSPACE_ID" CONFIG_DIR="$CONFIG_DIR" \
+    envsubst '${WORKSPACE_ID} ${CONFIG_DIR}' < "$f" > "$CONFIG_DIR/$(basename "$f")"
+done
 
 # Every scenario is self-contained — no borrowing config from a sibling.
 IMPORT_CONFIG_DIR="$CONFIG_DIR"
 WAREHOUSE_CONFIG_DIR="$CONFIG_DIR"
 
-for f in collector.yaml connections.yaml flow.yaml banding.yaml reconcile.yaml \
-         warehouse-wiring.yaml warehouse-canonical-wiring.yaml; do
-  [[ -f "$CONFIG_DIR/$f" ]] || die "scenario config is missing $f: $CONFIG_DIR/$f"
-done
-
-# WORKSPACE_ID lives in scenario.env, but the warehouse wiring carries its own
-# copy that the image reads. Fail loudly rather than run a mismatched pair.
-wiring_workspace="$(awk '/^[[:space:]]*workspace_id:/ { print $2; exit }' "$CONFIG_DIR/warehouse-wiring.yaml")"
-[[ "$wiring_workspace" == "$WORKSPACE_ID" ]] || die \
-  "workspace mismatch: scenario.env WORKSPACE_ID=$WORKSPACE_ID but warehouse-wiring.yaml workspace_id=${wiring_workspace:-<unset>}"
+# Cheap post-render check: an unrendered placeholder, or a scenario that wrote
+# the workspace name literally somewhere, would otherwise surface much later as
+# a reconcile binding error.
+if grep -rlq '\${' "$CONFIG_DIR"; then
+  die "unrendered placeholder left in $CONFIG_DIR: $(grep -rl '\${' "$CONFIG_DIR" | tr '\n' ' ')"
+fi
+rendered_workspace="$(awk '/^[[:space:]]*workspace_id:/ { print $2; exit }' "$CONFIG_DIR/warehouse-wiring.yaml")"
+[[ "$rendered_workspace" == "$WORKSPACE_ID" ]] || die \
+  "workspace mismatch after render: WORKSPACE_ID=$WORKSPACE_ID but warehouse-wiring.yaml workspace_id=${rendered_workspace:-<unset>}"
+grep -q "warehouse/ws_${WORKSPACE_ID}:" "$CONFIG_DIR/reconcile.yaml" || die \
+  "reconcile.yaml has no target_mapping for warehouse/ws_${WORKSPACE_ID}"
 
 mkdir -p "$TESTKIT_ROOT/artifacts" "$TESTKIT_ROOT/receipts"
 mkdir -p "$TESTKIT_ROOT/container-tmp"
