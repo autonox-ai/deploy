@@ -129,15 +129,17 @@ workspace and in order:
    generate the file on the host, then apply it inside the container instead:
 
    ```bash
-   mkdir -p "$AUTONOX_HOME/generated"
+   mkdir -p "$AUTONOX_HOME/var/sql"
    WS_NAME=prod envsubst < postgres/bootstrap/ws_setup.sql.tmpl \
-     > "$AUTONOX_HOME/generated/ws_prod_setup.sql"
+     > "$AUTONOX_HOME/var/sql/ws_prod_setup.sql"
    docker exec -i nox-pg18 psql -U postgres -d autonox \
-     < "$AUTONOX_HOME/generated/ws_prod_setup.sql"
+     < "$AUTONOX_HOME/var/sql/ws_prod_setup.sql"
    ```
 
-   Generated SQL goes to `$AUTONOX_HOME/generated/`, not into this repo, for
-   the same reason as the environment file.
+   Generated SQL goes to `$AUTONOX_HOME/var/`, not into this repo, for the
+   same reason as the environment file. Everything under `var/` is output —
+   rendered SQL, run logs, evidence — and is safe to delete; the files beside
+   it are the configuration you own.
 2. Warehouse migrations via [`../../workloads/warehouse/README.md`](../../workloads/warehouse/README.md)
    — runs as `noxop`, creates tables inside the schema from step 1.
 3. Import via [`../../workloads/import/README.md`](../../workloads/import/README.md)

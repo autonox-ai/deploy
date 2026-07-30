@@ -44,8 +44,9 @@ WORKSPACE_ID=prod
 EOF
 chmod 600 "$AUTONOX_HOME/warehouse.env"
 
+mkdir -p "$AUTONOX_HOME/var/logs"
 WAREHOUSE_ENV_FILE="$AUTONOX_HOME/warehouse.env" ./run.sh upgrade-workspace \
-  | tee "$AUTONOX_HOME/evidence-upgrade-workspace.log"
+  | tee "$AUTONOX_HOME/var/logs/upgrade-workspace.log"
 ```
 
 Each of the four steps prints `{"status":"ok"}`; the last also lists the
