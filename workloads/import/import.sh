@@ -14,9 +14,13 @@ CURRENT_TASK=""
 usage() {
   cat <<'EOF'
 Usage:
-  import.sh start
-  import.sh resume --receipt <receipt.json>
+  import.sh [-q|--quiet] start
+  import.sh [-q|--quiet] resume --receipt <receipt.json>
   import.sh status --receipt <receipt.json>
+
+Options:
+  -q, --quiet   Suppress per-task progress on stderr. Progress carries the same
+                messages the receipt records; the receipt is written either way.
 
 All deployment configuration is supplied through environment variables. See
 .env.example and import-orchestration.md. `start` creates a new import; it
@@ -26,6 +30,13 @@ EOF
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
+
+# One line per task, to stderr — stdout stays empty for callers that parse it,
+# and the receipt remains the record of truth. Messages are the same strings
+# already stored in the receipt, so nothing new is disclosed: values, mount
+# sources and runtime arguments stay redacted. Silence with -q/--quiet.
+QUIET=0
+progress() { (( QUIET )) || printf '%s\n' "$*" >&2; }
 
 require_command() { command -v "$1" >/dev/null 2>&1 || die "required command is unavailable: $1"; }
 require_var() { [[ -n "${!1:-}" ]] || die "required environment variable is missing: $1"; }
@@ -165,6 +176,12 @@ record_event() {
     --arg task "$task" --arg status "$status" --arg result "$result" --arg log "$log" \
     --argjson exit "$exit_code" --arg now "$(date -u +%FT%TZ)" --arg message "$message"
   publish_receipt >/dev/null
+  if [[ "$status" == succeeded ]]; then
+    local elapsed=""
+    [[ -n "${TASK_STARTED_EPOCH:-}" ]] && elapsed=" ($((SECONDS - TASK_STARTED_EPOCH))s)"
+    progress "✓ ${task}${elapsed}${message:+ — ${message}}"
+    TASK_STARTED_EPOCH=""
+  fi
 }
 
 redacted_command() {
@@ -207,6 +224,8 @@ run_task() {
   stamp="$(date -u +%Y%m%dT%H%M%SZ)-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
   ATTEMPT_DIR="${RUN_DIR}/attempts/${task}/${stamp}"
   mkdir -p "$ATTEMPT_DIR"
+  TASK_STARTED_EPOCH=$SECONDS
+  progress "→ ${task}"
   result="${ATTEMPT_DIR}/result.json"; log="${ATTEMPT_DIR}/stderr.log"
   start="$(date -u +%FT%TZ)"; command_json="$(redacted_command "$tool" "$image")"
   set +e
@@ -380,6 +399,13 @@ preflight_stage() {
 }
 
 main() {
+  while [[ "${1:-}" == -* ]]; do
+    case "$1" in
+      -q|--quiet) QUIET=1; shift ;;
+      -h|--help)  usage; exit 0 ;;
+      *) usage >&2; exit 2 ;;
+    esac
+  done
   local action="${1:-}" receipt=""
   case "$action" in
     start) shift ;;

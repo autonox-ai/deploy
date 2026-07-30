@@ -45,6 +45,12 @@ must begin with `ARTIFACT_URI_PREFIX`, which maps to `ARTIFACT_HOST_ROOT` for
 hashing and to a separate per-tool container path prefix through the declared
 volumes.
 
+The driver prints one line per task to stderr as it goes — `→ <task>` on start,
+`✓ <task> (<seconds>) — <message>` on success — using the same messages it
+records in the receipt. stdout stays empty, so callers parsing it are
+unaffected, and schedulers capture the progress in their logs. Pass
+`-q`/`--quiet` to suppress it; the receipt is written either way.
+
 ## When a step fails
 
 The driver reports only which task failed — for example `silver failed; see
