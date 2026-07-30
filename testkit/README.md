@@ -36,6 +36,27 @@ Scenarios are self-contained — none reads another's config. `templates/` holds
 reference wiring and annotated `*.env.example` files to copy from; it is not a
 scenario and cannot be run.
 
+Copy `scenarios/mock-hr/` as the starting point: it is a working end-to-end
+scenario, and its config pack shows the shape the images actually accept.
+
+Four constraints there are easy to get wrong, and three of them fail *silently*
+— a green import that writes nothing:
+
+- **Collect scalar columns, not JSON.** `json_build_object(...)` arrives as a
+  string, the mapper has no JSON-decode transform, and the value is dropped.
+  Cast non-JSON-safe types instead (`hire_date::text`).
+- **`attributes` is a sibling of `columns`**, not one of them. Under
+  `columns` it fails schema validation; as a sibling it fills the JSONB bag
+  field by field. That bag is what banding and attribute merge read.
+- **Banding merges under `partitions.columns`**, not `partitions.output`.
+- **`banding_attributes` keys must equal the collector's `system_instance_id`**
+  and match `^[a-z][a-z0-9_]*$`. A hyphenated instance id can never be banded:
+  the key silently fails to match, banding skips attribute lookup, and every
+  link becomes its own identity with an empty merged bag.
+
+Because of that last one, assert *fields*, not row counts. Counting rows passes
+while every merged attribute is null.
+
 ## Usage
 
 Generate the env files, then run the whole thing:

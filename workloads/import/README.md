@@ -45,5 +45,23 @@ must begin with `ARTIFACT_URI_PREFIX`, which maps to `ARTIFACT_HOST_ROOT` for
 hashing and to a separate per-tool container path prefix through the declared
 volumes.
 
+## When a step fails
+
+The driver reports only which task failed — for example `silver failed; see
+<RECEIPT_DIR>/<orchestration_run_id>/latest`. The tool's actual error is not in
+that receipt; it is in the attempt log:
+
+```bash
+cat "$RECEIPT_DIR"/<orchestration_run_id>/attempts/<task>/*/stderr.log
+```
+
+That file holds the JSON error the CLI emitted — schema validation failures name
+the offending path, and runtime errors carry a code such as
+`ERR_BANDING_ATTRIBUTE_MISSING` with the source and key involved. Start there
+before re-reading configuration.
+
+The receipt itself is still the record of what ran: `tasks.<name>.status` shows
+how far the orchestration got, and the run is resumable from it.
+
 See [Import orchestration](import-orchestration.md) for the lifecycle,
 failure handling, recovery rules, and scheduler integration requirements.
