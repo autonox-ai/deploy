@@ -15,9 +15,9 @@
 
 # --- AutoNox workload images (batch CLI dockers) ---
 # REPLACE the version pins with the release the customer is being upgraded to.
-ghcr.io/autonox-ai/collectors:sha-d7a1ca3-enterprise
-ghcr.io/autonox-ai/autonox-warehouse:sha-bacdab7
-ghcr.io/autonox-ai/reconciliation:sha-d7a1ca3-enterprise
+ghcr.io/autonox-ai/collectors:sha-4626b4c-enterprise
+ghcr.io/autonox-ai/autonox-warehouse:sha-ca9a4ad
+ghcr.io/autonox-ai/reconciliation:sha-4626b4c-enterprise
 #ghcr.io/autonox-ai/crossid-rule-import:sha-ce5aced
 
 # --- Third-party images used by deploy/* assets ---
