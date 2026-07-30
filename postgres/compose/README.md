@@ -20,6 +20,9 @@ set after startup with [`../bootstrap/passwords.sql`](../bootstrap/passwords.sql
 
 ## Start the bundled PostgreSQL server
 
+Run every command below from the **repository root**. Nothing in this guide
+writes into the repository — see step 2.
+
 ### 1. Pre-load the image
 
 Connected environment:
@@ -32,20 +35,44 @@ Air-gapped handoff: see [`../../images/airgap/README.md`](../../images/airgap/RE
 
 ### 2. Prepare the environment file
 
+Configuration lives **outside this repository**, in a directory you own, so
+that upgrading AutoNox is "replace the repo, keep your config". This guide
+calls that directory `$AUTONOX_HOME` and defaults it to `/etc/autonox`.
+
 ```bash
-cd postgres/compose
-cp .env.example .env
+export AUTONOX_HOME="${AUTONOX_HOME:-/etc/autonox}"
+mkdir -p "$AUTONOX_HOME"
+cp postgres/compose/postgres.env.example "$AUTONOX_HOME/postgres.env"
+chmod 600 "$AUTONOX_HOME/postgres.env"
 ```
 
-**Required:** set `POSTGRES_PASSWORD` in `.env` to a real, customer-managed
-secret. It ships empty on purpose — no baked-in secrets — and `docker compose
-up` will refuse to start until it's set.
+**Required:** set `POSTGRES_PASSWORD` in `$AUTONOX_HOME/postgres.env` to a
+real, customer-managed secret. It ships empty on purpose — no baked-in
+secrets — and `docker compose up` will refuse to start until it's set.
+
+Never edit files inside this repository. `git status --porcelain` (or a
+checksum of the tree) should stay empty after every step in this guide.
 
 ### 3. Start PostgreSQL
 
 ```bash
+docker compose -f postgres/compose/compose.yaml \
+  --env-file "$AUTONOX_HOME/postgres.env" up -d
+```
+
+To drop the flags from every later command, export the path once — Compose
+reads it automatically (requires Compose v2.24+):
+
+```bash
+export COMPOSE_FILE="$PWD/postgres/compose/compose.yaml"
+export COMPOSE_ENV_FILES="$AUTONOX_HOME/postgres.env"
 docker compose up -d
 ```
+
+The rest of this guide assumes those two exports are set; without them, add
+`-f` and `--env-file` to each `docker compose` invocation. Bind-mount paths in
+the spec resolve relative to `compose.yaml`, so it runs correctly from any
+working directory.
 
 On first startup, Compose mounts the shared AutoNox bootstrap SQL into
 `/docker-entrypoint-initdb.d`, so the `autonox` database and core roles are
@@ -74,7 +101,7 @@ docker exec -i nox-pg18 psql -U postgres -d postgres \
   -v noxop_password="$NOXOP_PASSWORD" \
   -v noxreader_password="$NOXREADER_PASSWORD" \
   -v bireader_password="$BIREADER_PASSWORD" \
-  < ../bootstrap/passwords.sql
+  < postgres/bootstrap/passwords.sql
 ```
 
 ### 6. Connect other containers
@@ -102,9 +129,15 @@ workspace and in order:
    generate the file on the host, then apply it inside the container instead:
 
    ```bash
-   WS_NAME=prod envsubst < ../bootstrap/ws_setup.sql.tmpl > ws_prod_setup.sql
-   docker exec -i nox-pg18 psql -U postgres -d autonox < ws_prod_setup.sql
+   mkdir -p "$AUTONOX_HOME/generated"
+   WS_NAME=prod envsubst < postgres/bootstrap/ws_setup.sql.tmpl \
+     > "$AUTONOX_HOME/generated/ws_prod_setup.sql"
+   docker exec -i nox-pg18 psql -U postgres -d autonox \
+     < "$AUTONOX_HOME/generated/ws_prod_setup.sql"
    ```
+
+   Generated SQL goes to `$AUTONOX_HOME/generated/`, not into this repo, for
+   the same reason as the environment file.
 2. Warehouse migrations via [`../../workloads/warehouse/README.md`](../../workloads/warehouse/README.md)
    — runs as `noxop`, creates tables inside the schema from step 1.
 3. Import via [`../../workloads/import/README.md`](../../workloads/import/README.md)
@@ -112,6 +145,9 @@ workspace and in order:
 The authoritative flow is in [`../README.md`](../README.md).
 
 ## Stop or remove
+
+These also interpolate the spec, so they need the same env file (or the
+`COMPOSE_FILE` / `COMPOSE_ENV_FILES` exports from step 3).
 
 Stop while keeping data:
 
@@ -124,3 +160,6 @@ Remove the database volume as well:
 ```bash
 docker compose down -v
 ```
+
+Neither removes `$AUTONOX_HOME` — your configuration survives teardown and
+repo upgrades alike.

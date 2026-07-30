@@ -16,6 +16,9 @@
 .env
 .env.*
 !.env.example
+# Customer config belongs in $AUTONOX_HOME, never in this tree.
+*.env
+!*.env.example
 
 # Terraform
 .terraform/
