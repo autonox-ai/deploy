@@ -158,6 +158,10 @@ provision_workspace() {
   command -v envsubst >/dev/null 2>&1 || die "required command is unavailable: envsubst"
   WS_NAME="$workspace" envsubst < "$ROOT/postgres/bootstrap/ws_setup.sql.tmpl" \
     | psql_super -d postgres
+  # Reconciliation's migrations runner creates public.schema_migrations and
+  # ignores control_plane_store.schema in reconcile.yaml, so noxop needs CREATE
+  # on public. Without it reconcile_validate dies with "permission denied for
+  # schema public". Drop this the day the runner honours its own wiring.
   psql_super -d autonox -c 'GRANT USAGE, CREATE ON SCHEMA public TO noxop;'
 }
 
