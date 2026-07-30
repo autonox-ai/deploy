@@ -120,6 +120,38 @@ the mismatch writes under the wrong workspace silently.
 by rendering `${WORKSPACE_ID}` (`testkit/init.sh`). Either template the wiring
 the same way, or have `run.sh` refuse to run when the two disagree.
 
+### 6c. One concept, several names across the env files
+
+Each workload should keep its own env file — different lifecycles (install vs
+image upgrade vs per-run), different blast radius (`postgres.env` holds the
+superuser credential; the thing running hourly imports must not read it), and
+different consumers (Compose interpolates a spec, `run.sh` sources a file,
+`import.sh` passes only allow-listed variable *names* into containers so values
+never reach a receipt). Merging them into one file defeats that last property.
+
+The duplication is the price, and it is small — four values, not four files:
+
+| Value | Duplicated across |
+| --- | --- |
+| `WORKSPACE_ID` | warehouse, import |
+| warehouse image | warehouse `WAREHOUSE_IMAGE`, import `WAREHOUSE_IMG` |
+| noxop DSN | warehouse `WAREHOUSE_POSTGRES_DSN`, import (allow-listed via `*_CONTAINER_ENV_NAMES`) |
+| docker network | warehouse `CONTAINER_NETWORK`, metabase `METABASE_DOCKER_NETWORK`, import (inside `*_CONTAINER_RUN_ARGS`) |
+
+`postgres.env` overlaps with nothing — it configures the server, not a client.
+Metabase's `MB_DB_*` is not duplication either: it connects as `bireader`.
+
+What to fix is the **naming**, not the file count:
+
+- `WAREHOUSE_IMAGE` vs `WAREHOUSE_IMG` for the same image is what allowed a
+  migrate and an import to run different versions of it (see item 6). Pick one.
+- Three spellings of "the docker network" means an operator cannot grep their
+  configuration for one concept.
+
+Accept one breaking rename now. Operators who want shared values can layer
+files themselves — `set -a; source common.env; source warehouse.env; set +a`
+works today and needs no support from this repo.
+
 ### 7. `container_name: nox-pg18` is daemon-global
 
 `postgres/compose/compose.yaml:5` pins it, so `TESTKIT_COMPOSE_PROJECT` cannot
