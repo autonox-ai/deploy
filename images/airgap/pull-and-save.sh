@@ -10,7 +10,10 @@
 # what this script actually saved.
 #
 # Usage:
-#   bash images/airgap/pull-and-save.sh ./tars [linux/amd64]
+#   bash images/airgap/pull-and-save.sh <output-dir> [linux/amd64]
+#
+# The output directory is required and must be outside this repository: bundles
+# are large, and the repo is a vendor tree that gets replaced on upgrade.
 #
 # Auth:
 #   For private ghcr.io/autonox-ai images, either run `gh auth login` first or
@@ -20,7 +23,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST="${MANIFEST:-${SCRIPT_DIR}/../manifest.txt}"
-OUT_DIR="${1:-./tars}"
+OUT_DIR="${1:-}"
+if [[ -z "$OUT_DIR" ]]; then
+  echo "usage: bash images/airgap/pull-and-save.sh <output-dir> [platform]" >&2
+  echo "the output directory is required; keep bundles outside this repository" >&2
+  exit 2
+fi
 PLATFORM="${2:-linux/amd64}"
 LOCK="${OUT_DIR}/bundle.lock"
 

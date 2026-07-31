@@ -30,10 +30,6 @@ terraform.tfvars
 *.auto.tfvars
 metabase/tf/provider-mirror
 
-# Testkit working dir (generated env files, artifacts, receipts)
-tmp/
-
-# Air-gap bundles (never commit)
-# Derived from images/manifest.txt via images/airgap/pull-and-save.sh — generate
-# on demand, ship, and discard. The manifest is the artifact worth versioning.
-tars/
+# Nothing generated belongs in this tree: writable paths resolve to
+# $AUTONOX_HOME, and air-gap bundles take an explicit directory. Deliberately
+# NOT ignoring tmp/ or tars/ — if either reappears, `git status` should say so.

@@ -3,7 +3,11 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TESTKIT_ROOT="${TESTKIT_ROOT:-$ROOT/tmp/testkit}"
+# Writable state never lands in the repository — it is a vendor tree that gets
+# replaced wholesale on upgrade, and receipts are durable audit evidence.
+# Unlike the customer-facing workloads this harness still defaults, so a fresh
+# clone runs without ceremony.
+TESTKIT_ROOT="${TESTKIT_ROOT:-${AUTONOX_HOME:-$HOME/.autonox}/var/testkit}"
 COMPOSE_FILE="${TESTKIT_POSTGRES_COMPOSE_FILE:-$ROOT/postgres/compose/compose.yaml}"
 COMPOSE_PROJECT="${TESTKIT_COMPOSE_PROJECT:-autonox-testkit}"
 WAREHOUSE_WORKLOAD="$ROOT/workloads/warehouse/run.sh"

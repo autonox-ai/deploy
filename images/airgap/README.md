@@ -9,20 +9,23 @@ proxy through JFrog. The workflow is:
    method (SFTP, removable media, approved share, etc.).
 3. **On the target host** — load the bundle into the local Docker daemon.
 
-Bundles are **generated on demand, never committed**. They are derived entirely
-from `manifest.txt`, so the manifest is the only thing worth version-controlling
-— `images/airgap/tars/` is in `.gitignore` and must stay there. Build a bundle
-when you need one, ship it, and let it go stale on disk; regenerating is cheaper
-than keeping a copy honest.
+Bundles are **generated on demand, never committed**, and never written inside
+this repository — both scripts require an explicit directory. They are derived
+entirely from `manifest.txt`, so the manifest is the only thing worth
+version-controlling. Build a bundle when you need one, ship it, and let it go
+stale on disk; regenerating is cheaper than keeping a copy honest.
+
+Multi-gigabyte bundles do not belong under `/etc`, so pick a path with room —
+`$AUTONOX_HOME/var/tars` below is only a convention.
 
 ## On the connected host
 
 ```bash
-bash images/airgap/pull-and-save.sh ./tars                # default platform: linux/amd64
-bash images/airgap/pull-and-save.sh ./tars linux/arm64    # to override
+bash images/airgap/pull-and-save.sh "$AUTONOX_HOME/var/tars"              # default platform: linux/amd64
+bash images/airgap/pull-and-save.sh "$AUTONOX_HOME/var/tars" linux/arm64  # to override
 ```
 
-The `./tars/` directory becomes a self-describing bundle: one `.tar` per image
+The bundle directory becomes self-describing: one `.tar` per image
 (named after the image reference, slashes and colons replaced with
 underscores), plus a **`bundle.lock`** recording, for each manifest entry, the
 resolved image ID, the registry digest, and the tar it lives in.
@@ -47,7 +50,7 @@ along with the tars; without it the target host cannot verify what it loaded.
 ## On the target host
 
 ```bash
-bash images/airgap/load.sh ./tars
+bash images/airgap/load.sh "$AUTONOX_HOME/var/tars"
 ```
 
 `load.sh` loads exactly the images `bundle.lock` lists and verifies each

@@ -9,11 +9,15 @@
 # asked for.
 #
 # Usage:
-#   bash images/airgap/load.sh ./tars
+#   bash images/airgap/load.sh <bundle-dir>
 
 set -euo pipefail
 
-IN_DIR="${1:-./tars}"
+IN_DIR="${1:-}"
+if [[ -z "$IN_DIR" ]]; then
+  echo "usage: bash images/airgap/load.sh <bundle-dir>" >&2
+  exit 2
+fi
 LOCK="${IN_DIR}/bundle.lock"
 
 if [[ ! -d "$IN_DIR" ]]; then

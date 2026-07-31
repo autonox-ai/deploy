@@ -98,8 +98,8 @@ export TESTKIT_PG_CONTAINER=nox-pg18
 NOXOP_PASSWORD='<that instance's noxop password>' ./testkit/init.sh mock-hr
 ./testkit/run.sh provision-workspace --workspace hello
 ./testkit/run.sh seed mock-hr
-./testkit/run.sh migrate --warehouse-env ./tmp/testkit/warehouse.env
-./testkit/run.sh import --env ./tmp/testkit/import.env
+./testkit/run.sh migrate --warehouse-env "$TESTKIT_ROOT/warehouse.env"
+./testkit/run.sh import --env "$TESTKIT_ROOT/import.env"
 ./testkit/run.sh assert mock-hr
 ```
 
@@ -144,7 +144,7 @@ produced the right rows; the harness prints a note saying so.
 a host with images already loaded by `images/airgap/load.sh` needs no registry:
 
 ```bash
-bash images/airgap/load.sh ./tars
+bash images/airgap/load.sh "$AUTONOX_HOME/var/tars"
 TESTKIT_OFFLINE=1 ./testkit/init.sh mock-hr
 ```
 
@@ -158,7 +158,7 @@ case the manifest tag is used and a note is printed. The tag is still pinned by
 
 | Variable | Purpose |
 | --- | --- |
-| `TESTKIT_ROOT` | Where env files, artifacts, and receipts are written. Default `./tmp/testkit`. |
+| `TESTKIT_ROOT` | Where env files, artifacts, and receipts are written. Default `$AUTONOX_HOME/var/testkit`, falling back to `$HOME/.autonox/var/testkit`. Never inside this repository. |
 | `TESTKIT_OFFLINE` | `1` fails instead of pulling a missing image. |
 | `TESTKIT_POSTGRES_COMPOSE_FILE` | Use a different Compose file. |
 | `TESTKIT_COMPOSE_PROJECT` | Use a different Compose project. |
@@ -174,6 +174,6 @@ testkit projects cannot run side by side until that pin is removed.
 For CI, point `TESTKIT_ROOT` somewhere outside the default:
 
 ```bash
-export TESTKIT_ROOT="$PWD/.ci/testkit"
+export TESTKIT_ROOT="$RUNNER_TEMP/testkit"
 ./testkit/init.sh mock-hr
 ```

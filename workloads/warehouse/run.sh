@@ -6,7 +6,22 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${WAREHOUSE_ENV_FILE:-${SCRIPT_DIR}/.env}"
+
+# Nothing writable or customer-specific resolves relative to this script: the
+# repository is a vendor tree that gets replaced wholesale on upgrade. Config
+# lives in $AUTONOX_HOME, or is named outright with WAREHOUSE_ENV_FILE.
+if [[ -z "${WAREHOUSE_ENV_FILE:-}" && -z "${AUTONOX_HOME:-}" ]]; then
+  echo "ERROR: set AUTONOX_HOME (config lives in \$AUTONOX_HOME/warehouse.env)" >&2
+  echo "       or point WAREHOUSE_ENV_FILE at the env file directly" >&2
+  exit 2
+fi
+ENV_FILE="${WAREHOUSE_ENV_FILE:-${AUTONOX_HOME}/warehouse.env}"
+
+if [[ ! -f "${ENV_FILE}" ]]; then
+  echo "ERROR: env file does not exist: ${ENV_FILE}" >&2
+  echo "       copy workloads/warehouse/.env.example there and fill it in" >&2
+  exit 2
+fi
 
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
@@ -48,12 +63,13 @@ CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 CONTAINER_NETWORK="${CONTAINER_NETWORK:-}"
 CONTAINER_MOUNT_SUFFIX="${CONTAINER_MOUNT_SUFFIX:-}"
 WAREHOUSE_PLATFORM="${WAREHOUSE_PLATFORM:-}"
-WAREHOUSE_CONFIG_DIR="${WAREHOUSE_CONFIG_DIR:-${SCRIPT_DIR}/config}"
+WAREHOUSE_CONFIG_DIR="${WAREHOUSE_CONFIG_DIR:-${AUTONOX_HOME:-}/warehouse-config}"
 WAREHOUSE_WIRING_PATH="${WAREHOUSE_WIRING_PATH:-/config/warehouse-wiring.yaml}"
 WAREHOUSE_CANONICAL_WIRING_PATH="${WAREHOUSE_CANONICAL_WIRING_PATH:-/config/warehouse-canonical-wiring.yaml}"
 
 if [[ "${WAREHOUSE_CONFIG_DIR}" != /* ]]; then
-  WAREHOUSE_CONFIG_DIR="${SCRIPT_DIR}/${WAREHOUSE_CONFIG_DIR}"
+  echo "ERROR: WAREHOUSE_CONFIG_DIR must be an absolute path outside this repository: ${WAREHOUSE_CONFIG_DIR}" >&2
+  exit 2
 fi
 
 require_var WAREHOUSE_POSTGRES_DSN

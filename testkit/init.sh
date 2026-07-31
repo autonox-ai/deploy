@@ -3,7 +3,11 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TESTKIT_ROOT="${TESTKIT_ROOT:-$ROOT/tmp/testkit}"
+# Writable state never lands in the repository — it is a vendor tree that gets
+# replaced wholesale on upgrade, and receipts are durable audit evidence.
+# Unlike the customer-facing workloads this harness still defaults, so a fresh
+# clone runs without ceremony.
+TESTKIT_ROOT="${TESTKIT_ROOT:-${AUTONOX_HOME:-$HOME/.autonox}/var/testkit}"
 SEED=0
 
 usage() {
@@ -11,7 +15,8 @@ usage() {
 Usage:
   testkit/init.sh [scenario] [--seed]
 
-Generates local warehouse/import env files under ./tmp/testkit by default.
+Generates local warehouse/import env files under
+$AUTONOX_HOME/var/testkit (default $HOME/.autonox/var/testkit).
 The default scenario is mock-hr.
 
 A scenario is a directory under testkit/scenarios/ containing scenario.env
