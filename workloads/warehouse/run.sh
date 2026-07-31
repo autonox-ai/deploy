@@ -41,7 +41,7 @@ Usage:
   run.sh raw <warehouse CLI arguments...>
 
 Commands:
-  migrate              Apply the Warehouse runtime migrations.
+  migrate              Apply the Warehouse runtime migrations for WORKSPACE_ID.
   canonical-shared     Apply shared canonical migrations.
   canonical-workspace  Apply canonical migrations for WORKSPACE_ID.
   install-access-layer Install BI, analytics, and audit access-layer objects.
@@ -135,12 +135,50 @@ require_workspace() {
   require_var WORKSPACE_ID
 }
 
+# TEMPORARY -- delete once the runtime wiring schema stops requiring
+# spec.workspace_id (TODO.md 3b, with the full removal checklist in 6b).
+#
+# WORKSPACE_ID is what the migrations follow: it is passed as --workspace-id,
+# and the CLI resolves defaults -> wiring file -> CLI overrides, so the flag
+# outranks the document. The document therefore cannot cause a wrong-workspace
+# migration -- it can only sit there stating a workspace that is silently
+# ignored, which is what this check exists to catch. It no-ops when the field
+# is absent, so it stays harmless if the deletion above is ever missed.
+check_wiring_workspace() {
+  local container_path="${WAREHOUSE_WIRING_PATH}"
+  # The document is only readable from here when it lives in the mounted dir.
+  case "${container_path}" in
+    /config/*) ;;
+    *) return 0 ;;
+  esac
+  local host_path="${WAREHOUSE_CONFIG_DIR}/${container_path#/config/}"
+  [[ -r "${host_path}" ]] || return 0
+
+  local declared
+  declared="$(awk '/^[[:space:]]*workspace_id:/ { print $2; exit }' "${host_path}")"
+  declared="${declared%\"}"; declared="${declared#\"}"
+  declared="${declared%\'}"; declared="${declared#\'}"
+  [[ -n "${declared}" ]] || return 0
+
+  if [[ "${declared}" != "${WORKSPACE_ID}" ]]; then
+    echo "ERROR: the env file and the wiring document name different workspaces" >&2
+    echo "       WORKSPACE_ID=${WORKSPACE_ID}" >&2
+    echo "         from ${ENV_FILE}" >&2
+    echo "       workspace_id: ${declared}" >&2
+    echo "         from ${host_path}" >&2
+    echo "       Make them match. WORKSPACE_ID is what the migrations follow." >&2
+    exit 2
+  fi
+}
+
 command="${1:-}"
 case "${command}" in
   migrate)
     [[ $# -eq 1 ]] || { usage >&2; exit 2; }
-    announce 'migrate runtime schemas'
-    run_with_wiring "${WAREHOUSE_WIRING_PATH}" migrate
+    require_workspace
+    check_wiring_workspace
+    announce "migrate runtime schemas: ${WORKSPACE_ID}"
+    run_with_wiring "${WAREHOUSE_WIRING_PATH}" migrate --workspace-id "${WORKSPACE_ID}"
     ;;
   canonical-shared)
     [[ $# -eq 1 ]] || { usage >&2; exit 2; }
@@ -162,8 +200,9 @@ case "${command}" in
   upgrade-workspace)
     shift || true
     require_workspace
+    check_wiring_workspace
     announce 'upgrade workspace: runtime migrations'
-    run_with_wiring "${WAREHOUSE_WIRING_PATH}" migrate
+    run_with_wiring "${WAREHOUSE_WIRING_PATH}" migrate --workspace-id "${WORKSPACE_ID}"
     announce 'upgrade workspace: canonical shared migrations'
     run_with_wiring "${WAREHOUSE_CANONICAL_WIRING_PATH}" canonical migrate --shared
     announce "upgrade workspace: canonical workspace migrations: ${WORKSPACE_ID}"

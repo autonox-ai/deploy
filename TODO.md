@@ -90,6 +90,52 @@ stay green while every attribute is null. That is how mock-hr shipped.
 
 Either validate that the two agree, or allow the same character set in both.
 
+### 3b. The runtime wiring requires `workspace_id`, which is not a wiring concern
+
+Every other field in `spec` of `warehouse.runtime.config.spec.v1` describes
+**topology** — `control_plane`, `artifact_store`, `bronze`, `silver`,
+`canonical_store`, `secrets_providers_uri`: where things live and how to reach
+them. `workspace_id` is the only one naming the **operand**: which workspace a
+single invocation acts on. The two have different lifecycles — topology changes
+when you re-platform, the operand changes per run — so they should not be
+required to travel in the same document.
+
+The product already models it the other way one command over:
+`warehouse.canonical.config.spec.v1` has no `workspace_id` at all, and
+`canonical migrate` / `canonical install-access-layer` take it only as
+`--workspace-id`. One CLI, one concept, two answers.
+
+Measured on `sha-ca9a4ad` with `warehouse wiring --wiring …`, which resolves and
+validates without touching the database:
+
+| wiring `spec.workspace_id` | `WAREHOUSE_WORKSPACE_ID` | `--workspace-id` | resolved |
+| --- | --- | --- | --- |
+| `local` | `fromenv` | — | `local` |
+| absent | `fromenv` | — | `WIRING_VALIDATION_FAILED` |
+| `local` | — | `fromcli` | `fromcli` |
+| absent | — | — | `WIRING_VALIDATION_FAILED` |
+
+Two consequences, both invisible from the outside:
+
+- **The field cannot be omitted.** `spec.required` lists it and `spec` is
+  `additionalProperties: false`, so every operator must write a workspace name
+  into a document that will then be overridden by the flag.
+- **`WAREHOUSE_WORKSPACE_ID` is dead for this field.** It enters as the
+  `defaults` layer (`cli.py:284-292`, passed as `defaults=` at `cli.py:322-324`)
+  and the merge is `defaults → wiring → CLI overrides`
+  (`runtime/wiring/service.py:63-65`). Being a *fallback* rather than an
+  override, it can only fill a field the wiring omits — and this field can never
+  be omitted. It is documented as configurable and is unreachable.
+
+**Ask:** drop `workspace_id` from `required` in
+`autonox/warehouse/schema/warehouse.runtime.config.spec.v1.schema.json`. Keep it
+permitted, so existing documents stay valid. Nothing else needs to move:
+`cli.py:518` already raises `runtime.workspace_id.missing` when no layer supplies
+it, and that becomes the real check — at the point where the value is actually
+needed, rather than at document-validation time.
+
+Follow-up in this repo once it ships: **6b**.
+
 ## This repo
 
 ### 4. Customer config still written in-tree
@@ -118,43 +164,65 @@ an older image and surfaces three steps later as
 a missing migration rather than a version skew. Worth a note in
 `workloads/warehouse/README.md`, or a check in the runner.
 
-### 6b. The warehouse workload names the workspace twice, and both are live
+### 6b. The warehouse workload names the workspace twice — mitigated, not solved
 
-`WORKSPACE_ID` in the env file and `spec.workspace_id` in the warehouse wiring
-must agree, and nothing checks it. They are not alternatives — they feed
-different commands inside the same `upgrade-workspace` sequence.
+**The bug, for the record.** `WORKSPACE_ID` in the env file and
+`spec.workspace_id` in the warehouse wiring were not alternatives: they fed
+different commands inside the same `upgrade-workspace` sequence, and nothing
+compared them.
 
-The image resolves workspace_id in three layers, later overriding earlier
-(`autonox/warehouse/cli.py`):
-
-```
-wiring spec.workspace_id                     base
-  ← WAREHOUSE_WORKSPACE_ID                   _parse_env_stage:289
-    ← --workspace-id                         _shared_overrides:299
-```
-
-It is required — `cli.py:518` raises `runtime.workspace_id.missing` when no
-layer supplies it. Which layer wins depends on the command:
-
-| `run.sh` step | Command | workspace_id from |
+| `run.sh` step | Command | workspace_id came from |
 | --- | --- | --- |
-| 1 | `migrate` | **the wiring** — no `--workspace-id` is passed |
+| 1 | `migrate` | **the wiring** — no `--workspace-id` was passed |
 | 2 | `canonical migrate --shared` | shared, not workspace-scoped |
 | 3 | `canonical migrate --workspace-id <id>` | the flag |
 | 4 | `canonical install-access-layer --workspace-id <id>` | the flag |
 
-So step 1 runs with whatever the wiring says, and steps 3–4 with whatever the
-env file says. Observed in a rehearsal: wiring `prod`, env `local`. It passed
-only because runtime `migrate` creates the control-plane tables without writing
-workspace-scoped rows — the `workspace_id` columns are populated later, at
-import time, from a different (correct) wiring. The day a runtime migration
-scopes anything by that value — a partitioned table, a per-workspace index —
-the mismatch writes under the wrong workspace silently.
+Observed in a rehearsal: wiring `prod`, env `local`, every step reporting
+`{"status":"ok"}`. It passed only because runtime `migrate` creates the
+control-plane tables without writing workspace-scoped rows — those columns are
+populated later, at import time, from a different (correct) wiring. The day a
+runtime migration scopes anything by that value — a partitioned table, a
+per-workspace index — the mismatch would write under the wrong workspace
+silently.
 
-`workloads/warehouse/README.md` still says to copy `examples/config/` and
-"adjust `workspace_id`", which is exactly the duplication the testkit removed
-by rendering `${WORKSPACE_ID}` (`testkit/init.sh`). Either template the wiring
-the same way, or have `run.sh` refuse to run when the two disagree.
+**What was done.** `WORKSPACE_ID` is now the single source of truth:
+`run.sh migrate` passes `--workspace-id` like the other three commands, so the
+flag — the highest-precedence layer — decides for the whole sequence, and
+`check_wiring_workspace` refuses to start when the wiring document disagrees.
+
+**Why this is a mitigation and not the fix.** Cross-config validation is what
+you write when a value lives in a document that should not own it. The wiring
+document still has to carry a `workspace_id` that is now always overridden, so
+the guard exists only to stop an operator being misled by a value that does
+nothing. That is a documentation defect enforced by code. The field cannot
+simply be deleted today — the schema requires it. See **3b** for the upstream
+ask.
+
+**Once 3b ships, in this repo:**
+
+1. Delete `spec.workspace_id` from the four wiring documents that carry it:
+   - `workloads/warehouse/examples/config/warehouse-wiring.yaml:6` (`prod`)
+   - `testkit/templates/config/warehouse-wiring.yaml:6` (`hello`)
+   - `testkit/scenarios/mock-hr/config/warehouse-wiring.yaml:6` (`${WORKSPACE_ID}`)
+   - any deployed `$AUTONOX_HOME/warehouse-config/warehouse-wiring.yaml`
+2. Delete `check_wiring_workspace` from `workloads/warehouse/run.sh` and its two
+   call sites (`migrate`, `upgrade-workspace`). It already returns early when the
+   field is absent, so removal is cleanup with no behaviour change — and leaving
+   it in place is harmless if this step is missed.
+3. Drop the render-time guard at `testkit/init.sh:103-105`, which exists for the
+   same duplication. The `${`-placeholder check just above it stays; it covers
+   the rest of the rendered config.
+4. `workloads/warehouse/.env.example` — trim the `WORKSPACE_ID` comment back to
+   "required by every command except `raw`"; the sentences about outranking the
+   wiring document and about `run.sh` refusing to run become false.
+5. `workloads/warehouse/README.md:102-103` — "Copy them as a starting point and
+   adjust `workspace_id`" is then wrong; there is nothing to adjust.
+6. `$AUTONOX_HOME/RUNBOOK.md` step 5 — drop the paragraph explaining which of the
+   two names wins.
+
+Keep this item open until all six are done: after 3b the mitigation is dead
+weight that still reads as a live constraint.
 
 ### 6c. One concept, several names across the env files
 
