@@ -31,6 +31,42 @@ Worked around by `testkit/run.sh:161-165` and step 3 of the rehearsal runbook.
   life of the deployment undoes that, and many customers forbid DDL rights on a
   routine scheduled job.
 
+### 1b. A transient failure after `intents_emitted` cannot be resumed
+
+`import-orchestration.md:156` is explicit: once Silver reaches `intents_emitted`
+the workspace lock is intentionally retained, no second Silver run may start,
+and recovery is to "resume validation/reconciliation from the frozen JSONL".
+`import.sh` cannot do that — `run_pipeline` (`import.sh:365`) refuses any
+receipt containing a failed task:
+
+```
+receipt records a failed or uncertain task (reconcile_validate);
+inspect subsystem state with its supported read-only adapter before resuming
+```
+
+So a transient downstream failure — a missing grant, a restarted database, a
+network blip — leaves the import unresumable, while the retained lock also
+blocks starting a new one until it expires. Observed in a rehearsal:
+`reconcile_validate` failed on a missing privilege, the privilege was granted
+seconds later, and there was no supported way forward.
+
+Three gaps behind it, all admitted in `import-orchestration.md:162`:
+
+- **No way to clear the failed task and continue.** Recovering meant
+  hand-editing a receipt to remove the failed entry — editing what is supposed
+  to be immutable audit evidence. There should be a first-class
+  "retry this task" path, gated on the operator having inspected state.
+- **A rewound resume corrupts the receipt sequence.** Resuming from an older
+  receipt restarts `receipt_sequence` there and overwrites the receipts above
+  it, so `latest` can point at a *worse* state than a higher-numbered receipt
+  still on disk. `workloads/import/README.md:22` tells operators to use "the
+  latest receipt there for safe inspection or recovery", which is then wrong.
+  Either refuse to rewind, or write forward without reusing sequence numbers.
+- **No supported Silver lock inspection or release.** `warehouse silver` has
+  only `run` and `finalize`. Lock state is visible solely by reading
+  `warehouse.silver_workspace_locks` directly, and expiry (a liveness escape
+  hatch, per `:160`) is the only way out.
+
 ### 2. Postgres collector emits JSON columns as strings
 
 `integrations/postgres/collector.py:34` does `payload = dict(row)`; the driver
