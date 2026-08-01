@@ -17,6 +17,39 @@ set -a; source .env; set +a
 ./import.sh start
 ```
 
+## One source per run
+
+An import run imports **one** source system. A deployment collecting from HR,
+Active Directory and Entra runs the driver three times, and roughly a third of
+the settings differ each time — `SYSTEM_INSTANCE_ID`, `COLLECTOR_SPEC`,
+`FLOW_SPEC`, `COMPLETION_POLICY`, and the collector's own credentials and
+mounts. The rest is deployment-wide.
+
+`run-import.sh` owns that split so `import.sh` does not have to. It takes a
+source name, composes `$AUTONOX_HOME/images.env`, `import.env` and
+`sources/<source>.env` in an erased environment, and execs the driver:
+
+```bash
+AUTONOX_HOME=/etc/autonox ./run-import.sh entra start
+AUTONOX_HOME=/etc/autonox ./run-import.sh hr status --receipt .../latest
+```
+
+The erased environment matters more than it looks: `set -a; source a.env;
+source b.env` accumulates, so any variable the first source sets and the second
+does not is still live. Running two sources from one shell can otherwise import
+one system with another's settings, and nothing downstream would object.
+
+Naming the source as an argument rather than selecting it through the
+environment also keeps it visible where operators actually look — `ps`, the
+journal, cron mail — and lets one systemd template unit serve every source. See
+[`systemd/`](systemd/) for that reference deployment.
+
+**Schedule imports into the same workspace so they cannot overlap.** Silver
+takes one lock per workspace, not per source (`silver_workspace_locks` keys on
+`workspace_id`), so a second concurrent import fails to acquire it. A run that
+fails after emitting intents keeps the lock until it expires — 7200s by default
+— so leave real headroom between sources.
+
 The script requires `jq`, a SHA-256 utility, and the configured container
 runtime. Every image must be pinned by digest. It writes immutable receipt
 versions below `RECEIPT_DIR/<orchestration_run_id>/`; use the latest receipt

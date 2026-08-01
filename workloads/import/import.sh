@@ -418,7 +418,9 @@ main() {
     jq '{orchestration_run_id,status,identity,silver,reconciliation,tasks,updated_at}' "$STATE_FILE"
     return
   fi
-  : "${CONTAINER_RUNTIME:=podman}"; : "${COMPLETION_POLICY:=observed_converged}"
+  # docker, matching workloads/warehouse/run.sh and the testkit. Set
+  # CONTAINER_RUNTIME=podman where that is the runtime.
+  : "${CONTAINER_RUNTIME:=docker}"; : "${COMPLETION_POLICY:=observed_converged}"
   for var in TENANT_ID ENVIRONMENT WORKSPACE_ID SYSTEM_INSTANCE_ID TARGET_REF COLLECTOR_IMG WAREHOUSE_IMG RECONCILE_IMG RECEIPT_DIR ARTIFACT_URI_PREFIX ARTIFACT_HOST_ROOT COLLECTOR_ARTIFACT_PATH_PREFIX WAREHOUSE_ARTIFACT_PATH_PREFIX RECONCILE_ARTIFACT_PATH_PREFIX COLLECTOR_SPEC CONNECTION_CATALOG COLLECTOR_ROOT_URI WAREHOUSE_WIRING FLOW_SPEC BANDING_SPEC RECONCILE_WIRING; do require_var "$var"; done
   validate_inputs
   if [[ "$action" == start ]]; then

@@ -1,0 +1,38 @@
+# Timer template, one instance per source system.
+#
+# IMPORTANT — stagger the instances. Silver takes one lock per WORKSPACE, not
+# per source: silver_workspace_locks has workspace_id as its PRIMARY KEY. Two
+# sources importing into the same workspace cannot overlap.
+#
+# The schedule below applies to every instance, which is exactly what you do
+# NOT want. Override it per source with a drop-in:
+#
+#   systemctl edit autonox-import@hr.timer
+#   systemctl edit autonox-import@entra.timer
+#
+# giving each its own OnCalendar, for example 02:00 and 03:30. Leave enough
+# room for the slowest source: a run that fails after emitting intents keeps
+# the workspace lock until it expires, so a tight schedule turns one broken
+# source into a failure on a healthy one.
+#
+# Separate timers rather than one job running every source in sequence: this
+# way an HR failure does not stop AD and Entra from running at all.
+
+[Unit]
+Description=AutoNox import timer: %i
+
+[Timer]
+OnCalendar=daily
+AccuracySec=1min
+
+# Spreads instances that share a schedule and absorbs thundering herds after a
+# reboot. Not a substitute for staggering OnCalendar.
+RandomizedDelaySec=15min
+
+# Run once after boot if the machine was down at the scheduled time.
+Persistent=true
+
+Unit=autonox-import@%i.service
+
+[Install]
+WantedBy=timers.target

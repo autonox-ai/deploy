@@ -80,15 +80,29 @@ with `ERR_BANDING_ATTRIBUTE_MISSING`. Workaround is to select scalar columns and
 map them one by one — see `testkit/scenarios/mock-hr/config/`. Either parse JSON
 columns in the collector, or add a decode transform to the mapper.
 
-### 3. Banding silently no-ops on a hyphenated `system_instance_id`
+### 3. Banding silently no-ops on an unmatched source name
 
-`banding_attributes` keys must equal the collector's `system_instance_id`, but
-the schema requires `^[a-z][a-z0-9_]*$`. With `system_instance_id: mock-hr` the
-key can never match, so banding **skips attribute lookup and passes** — every
-link becomes its own identity with an empty merged bag, and row-count assertions
-stay green while every attribute is null. That is how mock-hr shipped.
+`banding.py:441` looks up `banding_attributes.get(link.source)`, where
+`link.source` is the value the **flow spec** stamps on canonical rows
+(`source: {pipe: [{const: mock_hr}]}` in mock-hr's `flow.yaml`). When no key
+matches, banding **skips attribute lookup and passes**: every link becomes its
+own identity with an empty merged bag, so row-count assertions stay green while
+every attribute is null. That is how mock-hr shipped.
 
-Either validate that the two agree, or allow the same character set in both.
+The binding is therefore flow spec → banding spec, and nothing checks it. Two
+documents, one written by whoever onboards a source, and a typo in either is
+silent. The schema's `^[a-z][a-z0-9_]*$` on the banding key adds a trap: a
+source named with a hyphen can be stamped by the flow spec but can never be
+expressed as a banding key, so the pair cannot be made to agree at all.
+
+`silver run` reads both documents and can compare them. It should fail when the
+flow spec stamps a source the banding spec has no key for — or at minimum warn,
+since an intentionally unbanded source is conceivable.
+
+> Earlier revisions of this item claimed the key had to equal the collector's
+> `system_instance_id`. It does not: `system_instance_id` is passed separately
+> as `--system-instance-id` and never reaches this lookup. The two coincide in
+> mock-hr, which is what made the wrong reading plausible.
 
 ### 3b. The runtime wiring requires `workspace_id`, which is not a wiring concern
 

@@ -1,0 +1,48 @@
+# Template unit: one instance per source system.
+#
+#   systemctl start autonox-import@entra
+#
+# %i is the source name, which resolves to $AUTONOX_HOME/sources/%i.env. Adding
+# a fourth source system is a new env file and a new timer instance — no unit
+# to copy, nothing to edit here.
+#
+# Install:
+#   cp autonox-import@.service autonox-import@.timer /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now autonox-import@hr.timer autonox-import@entra.timer
+
+[Unit]
+Description=AutoNox import: %i
+Documentation=file:/opt/autonox/deploy/workloads/import/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+
+# run-import.sh erases the environment and rebuilds it, so this is the only
+# variable the unit needs. Anything else declared here is dropped unless it is
+# in the wrapper's allow-list.
+Environment=AUTONOX_HOME=/etc/autonox
+
+ExecStart=/opt/autonox/deploy/workloads/import/run-import.sh %i start
+
+# The account must read $AUTONOX_HOME, write RECEIPT_DIR and ARTIFACT_HOST_ROOT,
+# and reach the container runtime.
+User=autonox
+Group=autonox
+
+# An import holds the Silver workspace lock while it runs. Killing it mid-flight
+# leaves that lock held until it expires (7200s by default), so let it finish.
+TimeoutStartSec=7200
+KillSignal=SIGINT
+
+# Failures are recorded in the receipt; the journal carries the task progress
+# lines import.sh writes to stderr.
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
