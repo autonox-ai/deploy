@@ -104,6 +104,12 @@ docker exec -i nox-pg18 psql -U postgres -d postgres \
   < postgres/bootstrap/passwords.sql
 ```
 
+These three values are also embedded in the consumers that outlive the database
+— `WAREHOUSE_POSTGRES_DSN` in `workloads/warehouse`, `MB_DB_PASS` in
+`metabase`, and the import env. A `down -v` drops the roles but not those
+files, so re-running this step after one must use the same passwords, or every
+consumer has to be updated to match.
+
 ### 6. Connect other containers
 
 Attach future AutoNox containers to the `autonox-local` network.

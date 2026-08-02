@@ -13,41 +13,45 @@ wrong. Once nothing depends on it, delete it; git history holds the rest.
 
 ### 1. Reconciliation creates `public.schema_migrations`
 
-Its migrations runner ignores `control_plane_store.schema` and writes to
-`public`, so `noxop` needs permanent `CREATE` on `public` or every import dies:
+Filed upstream as
+[autonox-ai/reconciliation#14](https://github.com/autonox-ai/reconciliation/issues/14),
+which carries the full diagnosis and the agreed fix: add `reconcile migrate`,
+move the DDL out of `PostgresReconciliationStore.__init__` so the runtime path
+fails closed instead of migrating, and store `schema_migrations` in the
+control-plane schema.
+
+`noxop` needs permanent `CREATE` on `public` until it ships, or every import
+dies:
 
 ```
 psycopg.errors.InsufficientPrivilege: permission denied for schema public
 LINE 2: CREATE TABLE IF NOT EXISTS "public".schema_migrations...
-  autonox/reconciliation/migrations/runner.py:191 _ensure_migrations_table_pg
 ```
 
 Worked around by `testkit/run.sh:161-165` and step 3 of the rehearsal runbook.
 
-- **Minimum fix:** honour `control_plane_store.schema` (already set to
-  `reconciliation` in every wiring; the schema exists and sits empty). The
-  extra grant then disappears — `ws_setup.sql.tmpl` grants already cover it.
-- **Proper fix:** a `reconcile migrate` command mirroring `warehouse migrate`,
-  run once at deploy time by an admin role, with the runtime role holding DML
-  only and failing loudly when migrations are missing — the way Warehouse
-  reports "Silver schema missing; run `warehouse migrate`". `workloads/` then
-  gains a third workload and the deploy sequence is symmetric.
-- **Why it matters:** `public` is shared with every extension; PG15 revoked
-  `CREATE` there from `PUBLIC` precisely to stop this. Granting it back for the
-  life of the deployment undoes that, and many customers forbid DDL rights on a
-  routine scheduled job.
+**When #14 ships, in this repo:** drop that grant from both places, and add a
+third workload under `workloads/` for `reconcile migrate` so the deploy sequence
+is symmetric with `warehouse`.
 
 ### 1b. No supported Silver lock inspection or release
 
-`warehouse silver` has only `run` and `finalize`. Lock state is visible solely
-by reading `warehouse.silver_workspace_locks` directly, and expiry (a liveness
-escape hatch, per `import-orchestration.md:160`) is the only way out. A run that
-cannot be finalized therefore blocks its workspace for the full 7200s even after
-the operator knows exactly what happened and has fixed it.
+Filed upstream as
+[autonox-ai/warehouse#37](https://github.com/autonox-ai/warehouse/issues/37),
+asking for `silver lock status` and a guarded `silver lock release`. `silver`
+has only `run` and `finalize` today, so lock state is visible solely by reading
+`warehouse.silver_workspace_locks` directly, and expiry (a liveness escape
+hatch, per `import-orchestration.md:160`) is the only way out. A run that cannot
+be finalized therefore blocks its workspace for the full 7200s even after the
+operator knows exactly what happened and has fixed it.
 
 `import.sh retry-task` covers the repo side of this — an operator who has fixed
 the underlying problem gets a supported retry — but it cannot release a lock it
 does not own.
+
+**When #37 ships, in this repo:** have `retry-task` call `silver lock status`
+before retrying, so a blocked workspace reports who holds it instead of failing
+with `ERR_LOCK_UNAVAILABLE`.
 
 ### 2. Postgres collector emits JSON columns as strings
 
@@ -189,22 +193,6 @@ image release requires.
 
 ## This repo
 
-### 4. Customer config still written in-tree
-
-The `$AUTONOX_HOME` convention is done for `postgres/compose`,
-`workloads/warehouse`, `workloads/import` and both `workloads` READMEs. Still
-telling customers to write into the repo:
-
-- `metabase/compose/README.md:60`
-- `postgres/kustomize/examples/customer-overlay/` — overlays live in-tree
-
-### 5. Role passwords are not persisted
-
-`postgres.env` carries `POSTGRES_PASSWORD` but not `NOXOP_PASSWORD` /
-`NOXREADER_PASSWORD` / `BIREADER_PASSWORD`, so after `down -v` they must be
-remembered. Add them to `postgres.env.example` (empty) and have step 5 of
-`postgres/compose/README.md` source that file instead of ad-hoc exports.
-
 ### 6b. The warehouse workload names the workspace twice — mitigated, not solved
 
 **The bug, for the record.** `WORKSPACE_ID` in the env file and
@@ -337,16 +325,20 @@ Mostly closed. Still open:
 
 | Path | Written by | Default that puts it here |
 | --- | --- | --- |
-| `metabase/compose/.env` | operator | Compose's own `.env` beside the spec (`metabase/compose/README.md:60`) |
 | `metabase/tf/provider-mirror/` | `terraform providers mirror` | relative `provider-mirror/` (`metabase/tf/README.md:50`) |
 
-Both take the shape already applied elsewhere: default to `$AUTONOX_HOME`, keep
-generated output under `$AUTONOX_HOME/var/`, and never resolve a writable path
-relative to the script. The Compose one is the same `--env-file` treatment
-`postgres/compose` already got. `provider-mirror/` is a regenerable build
-output, so losing it is cheap — it just makes the tree non-replaceable in place.
+The fix takes the shape already applied elsewhere: default to `$AUTONOX_HOME`,
+keep generated output under `$AUTONOX_HOME/var/`, and never resolve a writable
+path relative to the script. `provider-mirror/` is a regenerable build output,
+so losing it is cheap — it just makes the tree non-replaceable in place.
 
-One stale leftover exists right now and should be deleted: `metabase/compose/.env`.
+Note the mirror is *committed* today — the index JSONs and the linux/amd64 zip
+are tracked, the arm64 zip beside them is not — while the path is also
+gitignored, so a regeneration silently adds nothing and drifts. Decide first
+whether the mirror ships as vendor content (then drop the ignore rule and track
+both platforms) or is generated per-install (then move the write target to
+`$AUTONOX_HOME/var/` and untrack it). Redirecting the output without settling
+that leaves the tracked copy stale.
 
 ### 10. mock-hr is a smoke test, not a fixture
 
