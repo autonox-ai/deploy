@@ -11,6 +11,25 @@ environment:
 The list of images required at a given AutoNox release lives in
 [`manifest.txt`](manifest.txt). Both paths consume it.
 
+## Pinning the workloads by digest
+
+`manifest.txt` pins tags, but `workloads/import` refuses any image that is not
+pinned by digest. [`resolve-digests.sh`](resolve-digests.sh) bridges the two,
+writing an `images.env` that both workloads read:
+
+```bash
+./resolve-digests.sh --out "$AUTONOX_HOME/images.env"                  # connected
+./resolve-digests.sh --from-lock /media/bundle/bundle.lock --out …     # air-gapped
+```
+
+`--from-lock` exists because images restored from a `docker save` tar carry no
+registry digest — it does not survive the round trip. The `bundle.lock` written
+by [`airgap/pull-and-save.sh`](airgap/pull-and-save.sh) on the connected side is
+the only record of them, so an air-gapped host must read it rather than ask the
+container runtime.
+
+Regenerate after every `manifest.txt` change.
+
 ## JFrog (recommended where allowed)
 
 JFrog Artifactory becomes the **single supply-chain gateway**. Production
