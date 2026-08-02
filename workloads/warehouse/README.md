@@ -31,12 +31,13 @@ mkdir -p "$AUTONOX_HOME/warehouse-config"
 cp examples/config/warehouse-wiring.yaml \
    examples/config/warehouse-canonical-wiring.yaml "$AUTONOX_HOME/warehouse-config/"
 
+# Pin all three workload images by digest, for this workload and for import.
+# On an air-gapped host: --from-lock /media/bundle/bundle.lock
+../../images/resolve-digests.sh --out "$AUTONOX_HOME/images.env"
+
 cat > "$AUTONOX_HOME/warehouse.env" <<EOF
 CONTAINER_NETWORK=autonox-local
 WAREHOUSE_PLATFORM=linux/amd64
-# This walkthrough only: reuse the repo's manifest pin. A real customer
-# environment sets its own reference — see Inputs below.
-WAREHOUSE_IMAGE=$(awk '/^ghcr\.io\/autonox-ai\/autonox-warehouse:/ { print; exit }' ../../images/manifest.txt)
 WAREHOUSE_CONFIG_DIR=$AUTONOX_HOME/warehouse-config
 WAREHOUSE_POSTGRES_DSN="postgresql://noxop:${NOXOP_PASSWORD}@postgres:5432/autonox"
 WAREHOUSE_CANONICAL_SHARED_SCHEMA=shared
@@ -107,6 +108,18 @@ wiring (secrets providers, non-file artifact stores, etc.).
 for this customer environment. There is no repo-wide default: each environment
 upgrades on its own cadence, so [`../../images/manifest.txt`](../../images/manifest.txt)
 cannot be authoritative for what a given deployment is actually running.
+
+Pin it in `$AUTONOX_HOME/images.env` rather than here.
+[`../../images/resolve-digests.sh`](../../images/resolve-digests.sh) writes that
+file, resolving the manifest's tags to digests, and both this workload and
+`workloads/import` read the same three names from it — which is what stops a
+migrate and an import running different builds of the same image. A stale pin
+otherwise surfaces three steps later as `ERR_SILVER_SCHEMA_CONTRACT_MISMATCH`,
+which reads as a missing migration rather than a version skew.
+
+`run.sh` sources `images.env` before the env file, so naming `WAREHOUSE_IMAGE`
+in `warehouse.env` still overrides it. Point `WAREHOUSE_IMAGES_ENV_FILE`
+elsewhere if the file does not live under `$AUTONOX_HOME`.
 
 Runtime tuning (podman, SELinux mounts, Apple Silicon emulation) is documented
 inline in `.env.example`.

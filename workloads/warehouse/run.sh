@@ -23,6 +23,20 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 2
 fi
 
+# images.env pins all three workload images by digest and is written by
+# images/resolve-digests.sh. Both workloads read the same three names, so
+# sourcing it here is what keeps a migrate and an import on one build — the
+# import side already does this in run-import.sh. It loads first so anything
+# named again in the env file below wins, leaving a deliberate override open.
+# Absent is fine: a deployment may pin WAREHOUSE_IMAGE in the env file instead.
+IMAGES_ENV_FILE="${WAREHOUSE_IMAGES_ENV_FILE:-${AUTONOX_HOME:+${AUTONOX_HOME}/images.env}}"
+if [[ -n "${IMAGES_ENV_FILE}" && -f "${IMAGES_ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${IMAGES_ENV_FILE}"
+  set +a
+fi
+
 if [[ -f "${ENV_FILE}" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -58,7 +72,7 @@ require_var() {
   fi
 }
 
-: "${WAREHOUSE_IMAGE:?set WAREHOUSE_IMAGE to the autonox-warehouse image pinned for this customer environment}"
+: "${WAREHOUSE_IMAGE:?set WAREHOUSE_IMAGE to the autonox-warehouse image pinned for this customer environment, in \$AUTONOX_HOME/images.env (written by images/resolve-digests.sh) or in the env file}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 CONTAINER_NETWORK="${CONTAINER_NETWORK:-}"
 CONTAINER_MOUNT_SUFFIX="${CONTAINER_MOUNT_SUFFIX:-}"
