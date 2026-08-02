@@ -20,6 +20,13 @@ image="${args[$image_index]}"
 command=("${args[@]:$((image_index + 1))}")
 joined="${command[*]}"
 
+# Fail the one command whose joined form contains FAKE_RUNTIME_FAIL, so tests
+# can drive the driver's failure and retry paths.
+if [[ -n "${FAKE_RUNTIME_FAIL:-}" && "$joined" == *"${FAKE_RUNTIME_FAIL}"* ]]; then
+  printf '%s\n' '{"error":"ERR_INJECTED","detail":"fake runtime failure"}' >&2
+  exit 70
+fi
+
 if [[ "$image" == *collectors* ]]; then
   collector_root="${ARTIFACT_HOST_ROOT}/collector.postgres.v1/mock-collector/default/collector-1/_meta"
   mkdir -p "$collector_root"

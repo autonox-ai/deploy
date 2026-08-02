@@ -33,43 +33,24 @@ Worked around by `testkit/run.sh:161-165` and step 3 of the rehearsal runbook.
   life of the deployment undoes that, and many customers forbid DDL rights on a
   routine scheduled job.
 
-### 1b. A transient failure after `intents_emitted` cannot be resumed
+### 1b. No supported Silver lock inspection or release
 
-`import-orchestration.md:156` is explicit: once Silver reaches `intents_emitted`
-the workspace lock is intentionally retained, no second Silver run may start,
-and recovery is to "resume validation/reconciliation from the frozen JSONL".
-`import.sh` cannot do that — `run_pipeline` (`import.sh:365`) refuses any
-receipt containing a failed task:
+`warehouse silver` has only `run` and `finalize`. Lock state is visible solely
+by reading `warehouse.silver_workspace_locks` directly, and expiry (a liveness
+escape hatch, per `import-orchestration.md:160`) is the only way out. A run that
+cannot be finalized therefore blocks its workspace for the full 7200s even after
+the operator knows exactly what happened and has fixed it.
 
-```
-receipt records a failed or uncertain task (reconcile_validate);
-inspect subsystem state with its supported read-only adapter before resuming
-```
-
-So a transient downstream failure — a missing grant, a restarted database, a
-network blip — leaves the import unresumable, while the retained lock also
-blocks starting a new one until it expires. Observed in a rehearsal:
-`reconcile_validate` failed on a missing privilege, the privilege was granted
-seconds later, and there was no supported way forward.
-
-Three gaps behind it, all admitted in `import-orchestration.md:162`:
-
-- **No way to clear the failed task and continue.** Recovering meant
-  hand-editing a receipt to remove the failed entry — editing what is supposed
-  to be immutable audit evidence. There should be a first-class
-  "retry this task" path, gated on the operator having inspected state.
-  **Half-landed and currently a bug:** `import.sh`'s usage block documents
-  `retry-task --receipt … --task … --acknowledge …` and describes it archiving
-  the failed attempt, but no such case exists in the command dispatch. The verb
-  is advertised and unimplemented — either finish it or remove it from usage.
-- ~~**A rewound resume corrupts the receipt sequence.**~~ **Done.**
-  `publish_receipt` now takes `max(sequence, highest_sequence_on_disk + 1)`, so
-  numbers are never reused and `latest` cannot regress below evidence still on
-  disk.
-- **No supported Silver lock inspection or release.** `warehouse silver` has
-  only `run` and `finalize`. Lock state is visible solely by reading
-  `warehouse.silver_workspace_locks` directly, and expiry (a liveness escape
-  hatch, per `:160`) is the only way out.
+The two repo-side gaps that used to sit here are done. `import.sh retry-task
+--receipt <r> --task <name> --acknowledge <reason>` gives a failed task a
+first-class, operator-acknowledged retry path: it archives the failed attempt
+under `tasks.<name>.history` and records the acknowledgement in
+`operator_actions` instead of requiring a hand-edited receipt, and the Bronze
+and reconciliation stages now gate per task so a retry never recollects,
+re-registers, reruns `stage-run`, or reapplies intents. `publish_receipt` takes
+`max(sequence, highest_sequence_on_disk + 1)`, so numbers are never reused and
+`latest` cannot regress below evidence still on disk. Both are covered by
+`workloads/import/tests/import_test.sh`.
 
 ### 2. Postgres collector emits JSON columns as strings
 
@@ -157,7 +138,7 @@ Follow-up in this repo once it ships: **6b**.
 ### 3c. CLI JSON output is unversioned, so the orchestrator hedges
 
 `import.sh` carries 22 `//` fallbacks across its task assertions
-(`import.sh:270-350`) — `.state // .status`,
+(`import.sh:310-410`) — `.state // .status`,
 `.manifest_sha256 // .manifest_hash`, `.workspace_id // .workspace`,
 `.staging_ref // .staging_evidence`. Each one is the orchestrator not knowing
 which CLI version it is talking to and accepting both shapes.

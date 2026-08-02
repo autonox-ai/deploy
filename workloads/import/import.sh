@@ -10,12 +10,23 @@ STATE_FILE=""
 RUN_DIR=""
 ATTEMPT_DIR=""
 CURRENT_TASK=""
+# Working copy of a receipt, created by load_state. Receipts are the durable
+# state, so this file is disposable and must not outlive the process.
+RESUME_STATE_FILE=""
+
+cleanup() {
+  [[ -n "$RESUME_STATE_FILE" ]] && rm -f "$RESUME_STATE_FILE"
+  return 0
+}
+trap cleanup EXIT
 
 usage() {
   cat <<'EOF'
 Usage:
   import.sh [-q|--quiet] start
   import.sh [-q|--quiet] resume --receipt <receipt.json>
+  import.sh [-q|--quiet] retry-task --receipt <receipt.json> --task <name>
+                                    --acknowledge <what you inspected>
   import.sh status --receipt <receipt.json>
 
 Options:
@@ -25,6 +36,12 @@ Options:
 All deployment configuration is supplied through environment variables. See
 .env.example and import-orchestration.md. `start` creates a new import; it
 never resumes a partially completed import.
+
+`resume` continues an interrupted import. It refuses a receipt recording a
+failed task, because a failure needs an operator to inspect subsystem state
+first. `retry-task` is that path: it records the acknowledgement, archives the
+failed attempt under the task's history rather than erasing it, and resumes.
+Set OPERATOR_ID to name the acknowledging operator in the receipt.
 EOF
 }
 
@@ -156,9 +173,25 @@ state_update() {
   mv "$tmp" "$STATE_FILE"
 }
 
+highest_sequence_on_disk() {
+  local best=0 file base n
+  for file in "${RUN_DIR}"/receipt.*.json; do
+    [[ -e "$file" ]] || continue
+    base="${file##*/}"; n="${base#receipt.}"; n="${n%.json}"
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    (( n > best )) && best="$n"
+  done
+  printf '%s' "$best"
+}
+
 publish_receipt() {
-  local sequence receipt tmp latest_tmp
+  local sequence receipt tmp latest_tmp on_disk
   sequence="$(jq -r '.receipt_sequence + 1' "$STATE_FILE")"
+  # Sequence numbers are never reused. Resuming from an older receipt would
+  # otherwise restart numbering there and overwrite the receipts above it,
+  # leaving `latest` pointing at a worse state than evidence still on disk.
+  on_disk="$(highest_sequence_on_disk)"
+  (( sequence > on_disk )) || sequence=$((on_disk + 1))
   state_update '.receipt_sequence = $n | .updated_at = $now' --argjson n "$sequence" --arg now "$(date -u +%FT%TZ)"
   receipt="${RUN_DIR}/receipt.${sequence}.json"
   tmp="${receipt}.tmp.$$"
@@ -294,15 +327,24 @@ bronze_stage() {
   local run_id manifest_uri manifest_path manifest_hash
   run_id="$(jq -r '.collector.run_id' "$STATE_FILE")"; manifest_uri="$(jq -r '.collector.manifest.uri' "$STATE_FILE")"
   manifest_hash="$(jq -r '.collector.manifest.sha256' "$STATE_FILE")"; manifest_path="$(uri_to_container_path WAREHOUSE "$manifest_uri")"
-  run_task bronze_register WAREHOUSE "$WAREHOUSE_IMAGE" bronze register-manifest --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id" --manifest "$manifest_path"
-  assert_json "$TASK_RESULT" --arg run "$run_id" --arg hash "$manifest_hash" '.run_id == $run and ((.manifest_sha256 // .manifest_hash) | sub("^sha256:"; "")) == $hash' "Bronze manifest registration does not match receipt"
-  record_event bronze_register succeeded "$TASK_RESULT" "$TASK_LOG" 0 "manifest registered"
-  run_task bronze_stage WAREHOUSE "$WAREHOUSE_IMAGE" bronze stage-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
-  assert_json "$TASK_RESULT" --arg run "$run_id" '.run_id == $run and ((.staging_ref // .staging_evidence) != null) and ((.staging_hash // .staging_sha256) != null)' "Bronze staging evidence is missing or mismatched"
-  record_event bronze_stage succeeded "$TASK_RESULT" "$TASK_LOG" 0 "staging evidence recorded"
-  run_task bronze_commit WAREHOUSE "$WAREHOUSE_IMAGE" bronze commit-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
-  assert_json "$TASK_RESULT" --arg ws "$WORKSPACE_ID" --arg run "$run_id" '(.workspace_id // .workspace) == $ws and .run_id == $run and (.state // .status) == "COMMITTED"' "Bronze run is not committed"
-  record_event bronze_commit succeeded "$TASK_RESULT" "$TASK_LOG" 0 "Bronze committed"
+  # Each task gates on its own receipt entry: a re-entry after a later failure
+  # must not re-register or blindly rerun stage-run, which a successful-but-
+  # unrecorded stage would conflict with.
+  if [[ "$(task_status bronze_register)" != succeeded ]]; then
+    run_task bronze_register WAREHOUSE "$WAREHOUSE_IMAGE" bronze register-manifest --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id" --manifest "$manifest_path"
+    assert_json "$TASK_RESULT" --arg run "$run_id" --arg hash "$manifest_hash" '.run_id == $run and ((.manifest_sha256 // .manifest_hash) | sub("^sha256:"; "")) == $hash' "Bronze manifest registration does not match receipt"
+    record_event bronze_register succeeded "$TASK_RESULT" "$TASK_LOG" 0 "manifest registered"
+  fi
+  if [[ "$(task_status bronze_stage)" != succeeded ]]; then
+    run_task bronze_stage WAREHOUSE "$WAREHOUSE_IMAGE" bronze stage-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
+    assert_json "$TASK_RESULT" --arg run "$run_id" '.run_id == $run and ((.staging_ref // .staging_evidence) != null) and ((.staging_hash // .staging_sha256) != null)' "Bronze staging evidence is missing or mismatched"
+    record_event bronze_stage succeeded "$TASK_RESULT" "$TASK_LOG" 0 "staging evidence recorded"
+  fi
+  if [[ "$(task_status bronze_commit)" != succeeded ]]; then
+    run_task bronze_commit WAREHOUSE "$WAREHOUSE_IMAGE" bronze commit-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
+    assert_json "$TASK_RESULT" --arg ws "$WORKSPACE_ID" --arg run "$run_id" '(.workspace_id // .workspace) == $ws and .run_id == $run and (.state // .status) == "COMMITTED"' "Bronze run is not committed"
+    record_event bronze_commit succeeded "$TASK_RESULT" "$TASK_LOG" 0 "Bronze committed"
+  fi
 }
 
 silver_stage() {
@@ -321,7 +363,7 @@ silver_stage() {
 }
 
 reconcile_stage() {
-  local intents_uri intents_path count hash current_hash group validate_result
+  local intents_uri intents_path count hash current_hash group
   intents_uri="$(jq -r '.silver.intents.uri' "$STATE_FILE")"; count="$(jq -r '.silver.intents.count' "$STATE_FILE")"; hash="$(jq -r '.silver.intents.sha256' "$STATE_FILE")"
   local host; host="$(uri_to_host_path "$intents_uri")"; [[ -f "$host" ]] || die "frozen intent file is missing"
   current_hash="$(sha256_file "$host")"; [[ "$current_hash" == "$hash" ]] || die "frozen intent file hash changed; refusing reconciliation"
@@ -333,19 +375,27 @@ reconcile_stage() {
     record_event reconcile_run succeeded "" "" 0 "explicit zero-intent no-op"
     publish_receipt >/dev/null; return
   fi
-  run_task reconcile_validate RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" validate --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
-  assert_json "$TASK_RESULT" --argjson count "$count" '.ok == true and ((.summary.processed // .processed) | tonumber) == $count' "Reconciliation validation did not process the complete frozen intent set"
-  record_event reconcile_validate succeeded "$TASK_RESULT" "$TASK_LOG" 0 "complete frozen JSONL validated"
-  validate_result="$TASK_RESULT"
-  run_task reconcile_run RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" run --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
-  assert_json "$TASK_RESULT" --argjson count "$count" '(.summary.processed // .processed | tonumber) == $count and (.summary.errors // .errors // 0 | tonumber) == 0' "Reconciliation did not successfully process every intent"
-  record_event reconcile_run succeeded "$TASK_RESULT" "$TASK_LOG" 0 "reconciliation run completed"
-  run_task reconciliation_evidence RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" get execution-group --workspace-id "$WORKSPACE_ID" --target-ref "$TARGET_REF" --execution-group "$group"
-  assert_json "$TASK_RESULT" --argjson count "$count" '(.counts.attempted // .attempted | tonumber) == $count and (.counts.succeeded // .succeeded | tonumber) == $count and ((.counts.failed // .failed // 0) | tonumber) == 0 and (.group_outcome == "succeeded" or .fully_succeeded == true)' "execution-group evidence is incomplete"
-  if [[ "$COMPLETION_POLICY" == "observed_converged" ]]; then
-    assert_json "$TASK_RESULT" '(.summary.converged // .converged // false) == true' "execution-group lacks converged observation evidence"
+  # Same per-task gating as Bronze: re-entering after an evidence failure must
+  # not reapply intents. Reconciliation dedups on the execution group, but the
+  # frozen JSONL above is what proves a redrive is the same work, not new work.
+  if [[ "$(task_status reconcile_validate)" != succeeded ]]; then
+    run_task reconcile_validate RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" validate --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
+    assert_json "$TASK_RESULT" --argjson count "$count" '.ok == true and ((.summary.processed // .processed) | tonumber) == $count' "Reconciliation validation did not process the complete frozen intent set"
+    record_event reconcile_validate succeeded "$TASK_RESULT" "$TASK_LOG" 0 "complete frozen JSONL validated"
   fi
-  record_event reconciliation_evidence succeeded "$TASK_RESULT" "$TASK_LOG" 0 "durable execution-group evidence accepted"
+  if [[ "$(task_status reconcile_run)" != succeeded ]]; then
+    run_task reconcile_run RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" run --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
+    assert_json "$TASK_RESULT" --argjson count "$count" '(.summary.processed // .processed | tonumber) == $count and (.summary.errors // .errors // 0 | tonumber) == 0' "Reconciliation did not successfully process every intent"
+    record_event reconcile_run succeeded "$TASK_RESULT" "$TASK_LOG" 0 "reconciliation run completed"
+  fi
+  if [[ "$(task_status reconciliation_evidence)" != succeeded ]]; then
+    run_task reconciliation_evidence RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" get execution-group --workspace-id "$WORKSPACE_ID" --target-ref "$TARGET_REF" --execution-group "$group"
+    assert_json "$TASK_RESULT" --argjson count "$count" '(.counts.attempted // .attempted | tonumber) == $count and (.counts.succeeded // .succeeded | tonumber) == $count and ((.counts.failed // .failed // 0) | tonumber) == 0 and (.group_outcome == "succeeded" or .fully_succeeded == true)' "execution-group evidence is incomplete"
+    if [[ "$COMPLETION_POLICY" == "observed_converged" ]]; then
+      assert_json "$TASK_RESULT" '(.summary.converged // .converged // false) == true' "execution-group lacks converged observation evidence"
+    fi
+    record_event reconciliation_evidence succeeded "$TASK_RESULT" "$TASK_LOG" 0 "durable execution-group evidence accepted"
+  fi
 }
 
 finalize_stage() {
@@ -359,10 +409,34 @@ finalize_stage() {
 
 task_status() { jq -r --arg task "$1" '.tasks[$task].status // "pending"' "$STATE_FILE"; }
 
+# Clearing a failed task must not erase the failed attempt: the receipt is
+# audit evidence, and hand-editing it was previously the only way forward. The
+# attempt moves into .tasks[<task>].history and the operator's acknowledgement
+# is recorded alongside it, so the retry stays provable after the fact.
+approve_retry() {
+  local task="$1" reason="$2" status actor now
+  status="$(task_status "$task")"
+  case "$task" in
+    collect)
+      die "collect cannot be retried in place: recollection creates a new source and Bronze run, which is a new import — run 'start' instead" ;;
+    preflight)
+      die "preflight cannot be retried in place: correct the configuration and run 'start' for a new attempt" ;;
+  esac
+  [[ "$status" == failed ]] || die "task is not failed and needs no retry approval: $task (status: $status)"
+  actor="${OPERATOR_ID:-$(id -un 2>/dev/null || printf 'unknown')}"
+  now="$(date -u +%FT%TZ)"
+  state_update '
+      .tasks[$task] |= (. + {status: "retry_approved", history: ((.history // []) + [del(.history)])})
+    | .operator_actions = ((.operator_actions // []) + [{action: "retry_task", task: $task, cleared_status: $status, reason: $reason, actor: $actor, at: $now}])' \
+    --arg task "$task" --arg status "$status" --arg reason "$reason" --arg actor "$actor" --arg now "$now"
+  publish_receipt >/dev/null
+  progress "↻ ${task} — retry acknowledged by ${actor}"
+}
+
 run_pipeline() {
   local failed
   failed="$(jq -r '.tasks | to_entries[]? | select(.value.status == "failed") | .key' "$STATE_FILE" | head -n 1)"
-  [[ -z "$failed" ]] || die "receipt records a failed or uncertain task ($failed); inspect subsystem state with its supported read-only adapter before resuming"
+  [[ -z "$failed" ]] || die "receipt records a failed or uncertain task ($failed); inspect subsystem state with its supported read-only adapter, then approve the retry: $SCRIPT_NAME retry-task --receipt <receipt.json> --task $failed --acknowledge <what you inspected>"
   [[ "$(task_status collect)" == succeeded ]] || collector_stage
   [[ "$(task_status bronze_register)" == succeeded && "$(task_status bronze_stage)" == succeeded && "$(task_status bronze_commit)" == succeeded ]] || bronze_stage
   [[ "$(task_status silver)" == succeeded ]] || silver_stage
@@ -388,6 +462,7 @@ load_state() {
   [[ -f "$receipt" ]] || die "receipt does not exist: $receipt"
   RUN_DIR="$(cd "$(dirname "$receipt")" && pwd)"; STATE_FILE="${RUN_DIR}/state.resume.$$.json"
   cp "$receipt" "$STATE_FILE"
+  RESUME_STATE_FILE="$STATE_FILE"
   ORCHESTRATION_RUN_ID="$(jq -r '.orchestration_run_id' "$STATE_FILE")"; SILVER_RUN_ID="$(jq -r '.silver.run_id' "$STATE_FILE")"
   TENANT_ID="$(jq -r '.identity.tenant_id' "$STATE_FILE")"; ENVIRONMENT="$(jq -r '.identity.environment' "$STATE_FILE")"; WORKSPACE_ID="$(jq -r '.identity.workspace_id' "$STATE_FILE")"; SYSTEM_INSTANCE_ID="$(jq -r '.identity.system_instance_id' "$STATE_FILE")"; TARGET_REF="$(jq -r '.identity.target_ref' "$STATE_FILE")"
 }
@@ -406,10 +481,27 @@ main() {
       *) usage >&2; exit 2 ;;
     esac
   done
-  local action="${1:-}" receipt=""
+  local action="${1:-}" receipt="" task="" reason=""
   case "$action" in
     start) shift ;;
     resume|status) shift; [[ "${1:-}" == "--receipt" && -n "${2:-}" ]] || { usage >&2; exit 2; }; receipt="$2"; shift 2 ;;
+    retry-task)
+      shift
+      while (( $# )); do
+        case "$1" in
+          --receipt|--task|--acknowledge)
+            [[ -n "${2:-}" ]] || { usage >&2; exit 2; }
+            case "$1" in
+              --receipt) receipt="$2" ;;
+              --task) task="$2" ;;
+              --acknowledge) reason="$2" ;;
+            esac
+            shift 2 ;;
+          *) usage >&2; exit 2 ;;
+        esac
+      done
+      [[ -n "$receipt" && -n "$task" && -n "$reason" ]] || { usage >&2; exit 2; }
+      ;;
     *) usage >&2; exit 2 ;;
   esac
   (( $# == 0 )) || die "unexpected arguments: $*"
@@ -430,6 +522,8 @@ main() {
   else
     load_state "$receipt"
     [[ "$(jq -r '.status' "$STATE_FILE")" != completed ]] || { note "import is already completed"; return; }
+    state_update '.resumed_from = $from' --arg from "$(basename "$receipt")"
+    [[ "$action" != retry-task ]] || approve_retry "$task" "$reason"
   fi
   run_pipeline
   note "completed import ${ORCHESTRATION_RUN_ID}; receipt: $(cat "${RUN_DIR}/latest")"

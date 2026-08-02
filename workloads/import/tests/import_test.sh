@@ -40,4 +40,64 @@ grep -q -- '--env TNS_ADMIN' "$TMP/runtime.log"
 ! grep 'warehouse.*--env TNS_ADMIN' "$TMP/runtime.log"
 ! grep -q 'oracle-secret' "$receipt_path"
 ! grep -q "$TMP/artifacts" "$receipt_path"
+
+# --- retry of a failed task ------------------------------------------------
+# A transient failure after intents_emitted must be recoverable without hand-
+# editing the receipt, and without redoing the work the receipt already proves.
+export ORCHESTRATION_RUN_ID=import_retry SILVER_RUN_ID=silver_retry
+export FAKE_RUNTIME_LOG="$TMP/retry.log"
+RUN_DIR="$TMP/receipts/import_retry"
+
+FAKE_RUNTIME_FAIL=' get execution-group ' "$DRIVER" start >/dev/null 2>&1 && exit 1
+failed_receipt="$RUN_DIR/$(cat "$RUN_DIR/latest")"
+jq -e '.tasks.reconciliation_evidence.status == "failed" and .tasks.reconcile_run.status == "succeeded"' "$failed_receipt" >/dev/null
+
+# resume alone must still refuse, and must name the retry path.
+"$DRIVER" resume --receipt "$failed_receipt" 2>"$TMP/refusal" && exit 1
+grep -q 'retry-task --receipt' "$TMP/refusal"
+
+# An acknowledgement is mandatory.
+"$DRIVER" retry-task --receipt "$failed_receipt" --task reconciliation_evidence 2>/dev/null && exit 1
+# Recollection is a new import, never an in-place retry.
+"$DRIVER" retry-task --receipt "$failed_receipt" --task collect --acknowledge x 2>"$TMP/collect-refusal" && exit 1
+grep -q 'new import' "$TMP/collect-refusal"
+
+# Receipts already on disk are immutable, including across the retry.
+find "$RUN_DIR" -name 'receipt.*.json' -exec shasum -a 256 {} \; >"$TMP/before.sha"
+runs_before="$(grep -c -- ' run --intents ' "$TMP/retry.log")"
+collects_before="$(grep -c -- 'collectors@sha256' "$TMP/retry.log")"
+
+OPERATOR_ID=tester "$DRIVER" retry-task --receipt "$failed_receipt" \
+  --task reconciliation_evidence --acknowledge 'queried the execution group; all 2 intents applied' >/dev/null
+
+shasum -a 256 -c "$TMP/before.sha" >/dev/null
+
+final="$RUN_DIR/$(cat "$RUN_DIR/latest")"
+jq -e '.status == "completed" and .tasks.reconciliation_evidence.status == "succeeded"' "$final" >/dev/null
+# The failed attempt is preserved, not erased, and the acknowledgement with it.
+jq -e '.tasks.reconciliation_evidence.history | length == 1 and .[0].status == "failed"' "$final" >/dev/null
+jq -e '.operator_actions | length == 1 and .[0].actor == "tester" and .[0].task == "reconciliation_evidence" and .[0].cleared_status == "failed"' "$final" >/dev/null
+jq -e '.resumed_from | startswith("receipt.")' "$final" >/dev/null
+# Nothing the receipt already proved was redone: no recollection, no reapply.
+[[ "$(grep -c -- ' run --intents ' "$TMP/retry.log")" == "$runs_before" ]]
+[[ "$(grep -c -- 'collectors@sha256' "$TMP/retry.log")" == "$collects_before" ]]
+# Sequence numbers are forward-only and each receipt records its own number.
+for path in "$RUN_DIR"/receipt.*.json; do
+  base="${path##*/}"; n="${base#receipt.}"; n="${n%.json}"
+  jq -e --argjson n "$n" '.receipt_sequence == $n' "$path" >/dev/null
+done
+# A rewind — resuming from an older receipt while higher-numbered ones exist —
+# must write forward rather than restarting numbering and overwriting them.
+find "$RUN_DIR" -name 'receipt.*.json' -exec shasum -a 256 {} \; >"$TMP/rewind.sha"
+high="$(cat "$RUN_DIR/latest")"; high="${high#receipt.}"; high="${high%.json}"
+OPERATOR_ID=tester "$DRIVER" retry-task --receipt "$failed_receipt" \
+  --task reconciliation_evidence --acknowledge 'rewound deliberately' >/dev/null
+shasum -a 256 -c "$TMP/rewind.sha" >/dev/null
+rewound="$(cat "$RUN_DIR/latest")"; rewound="${rewound#receipt.}"; rewound="${rewound%.json}"
+(( rewound > high ))
+
+# status leaves no working file behind.
+"$DRIVER" status --receipt "$RUN_DIR/$(cat "$RUN_DIR/latest")" >/dev/null
+[[ -z "$(find "$RUN_DIR" -name 'state.resume.*.json')" ]]
+
 printf '%s\n' 'import test passed'

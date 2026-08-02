@@ -102,5 +102,39 @@ before re-reading configuration.
 The receipt itself is still the record of what ran: `tasks.<name>.status` shows
 how far the orchestration got, and the run is resumable from it.
 
+`resume` handles interruptions, not failures: it refuses a receipt recording a
+failed task, because the orchestrator cannot know whether the subsystem's state
+matches what the receipt says. Once you have inspected that state, `retry-task`
+is the way forward:
+
+```bash
+OPERATOR_ID=asaf ./import.sh retry-task \
+  --receipt "$RECEIPT_DIR"/<id>/receipt.12.json \
+  --task reconciliation_evidence \
+  --acknowledge 'queried the execution group; all 240 intents applied'
+```
+
+It archives the failed attempt under `tasks.<name>.history` rather than erasing
+it, records the acknowledgement in `operator_actions`, and then resumes. Tasks
+the receipt already proves succeeded are skipped — a retry never recollects,
+re-registers a manifest, reruns `stage-run`, or reapplies intents.
+
+Two tasks are refused deliberately. `collect` cannot be retried in place,
+because recollecting creates a new source and Bronze run and is therefore a new
+import (`start`). `preflight` is likewise a new attempt. A failed `silver`
+before `intents_emitted` re-runs `silver run` with the same preallocated run
+ID; if the Warehouse CLI rejects reusing that ID, start a new import against the
+already committed Bronze run.
+
+Receipt sequence numbers are forward-only: retrying or resuming from an older
+receipt writes above the highest number on disk instead of overwriting the
+receipts between, so `latest` never points at a worse state than evidence still
+in the directory. `resumed_from` records which receipt an attempt started from.
+
+The Silver workspace lock is the one thing a retry cannot recover. `warehouse
+silver` exposes only `run` and `finalize` — there is no supported way to inspect
+or release a held lock, so a run that cannot be finalized waits out the 7200s
+expiry.
+
 See [Import orchestration](import-orchestration.md) for the lifecycle,
 failure handling, recovery rules, and scheduler integration requirements.
