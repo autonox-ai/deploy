@@ -191,11 +191,19 @@ image release requires.
 
 ### 4. Customer config still written in-tree
 
-The `$AUTONOX_HOME` convention is done for `postgres/compose` and
-`workloads/warehouse`. Still telling customers to write into the repo:
+The `$AUTONOX_HOME` convention is done for `postgres/compose`,
+`workloads/warehouse` and now `workloads/import`. Still telling customers to
+write into the repo:
 
-- `workloads/README.md:44`
-- `workloads/import/README.md:14`
+- ~~`workloads/README.md:44`~~ **Done.** The example shape now writes both env
+  files to `$AUTONOX_HOME` and invokes `run-import.sh` rather than a bare
+  `run.sh`.
+- ~~`workloads/import/README.md:14`~~ **Done.** The Quickstart was the last
+  documented path that wrote a DSN into the vendor tree, and it contradicted
+  `run-import.sh` — which already requires `AUTONOX_HOME` — thirteen lines
+  further down the same file. It now splits `.env.example` into
+  `$AUTONOX_HOME/import.env` plus `$AUTONOX_HOME/sources/<source>.env`, which
+  is what `.env.example`'s own header always described.
 - `metabase/compose/README.md:60`
 - `postgres/kustomize/examples/customer-overlay/` — overlays live in-tree
 
@@ -310,9 +318,10 @@ Accept one breaking rename now. Operators who want shared values can layer
 files themselves — `set -a; source common.env; source warehouse.env; set +a`
 works today and needs no support from this repo.
 
-**Watch, not yet actionable — the size of the env surface.** Import needs 36
-variables plus nine `*_CONTAINER_ENV_NAMES` / `*_VOLUMES` / `*_RUN_ARGS`
-entries, and each new component adds another triplet. Collapsing this into an
+**Watch, not yet actionable — the size of the env surface.** Import requires 21
+variables (`import.sh:516`) plus nine `*_CONTAINER_ENV_NAMES` / `*_VOLUMES` /
+`*_RUN_ARGS` entries and a tail of optional ones, and each new component adds
+another triplet. Collapsing this into an
 import profile was decided against deliberately
 (`import-orchestration.md:84,189`), and `run-import.sh` addressed the real pain
 — composition and leakage between sources — without it. Nothing to do now. If
@@ -341,9 +350,10 @@ Drop the pin and resolve the container through Compose (`run.sh` already does).
   contradicts `import-orchestration.md`'s "never search a filesystem for a
   manifest". Prefer fixing the collector contract to always emit `manifest.uri`
   so the fallback can go.
-- `workloads/import/README.md` — document the bash ≥ 4.3 requirement.
-  `read_nul_array` uses a nameref (`local -n`, `import.sh:86`), which macOS
-  stock bash 3.2 does not have.
+- ~~`workloads/import/README.md` — document the bash ≥ 4.3 requirement.~~
+  **Done.** Stated alongside the `jq` / SHA-256 / container-runtime
+  prerequisites, naming the nameref in `read_nul_array` as the reason and
+  Homebrew bash as the way out on macOS.
 - **Dedupe the example wiring YAML.** `workloads/warehouse/examples/config/`
   (`workspace_id: prod`) and `testkit/templates/config/` (`hello`) differ in two
   lines. Pick one canonical copy and point the other at it. Sequence this after
@@ -352,44 +362,41 @@ Drop the pin and resolve the container through Compose (`run.sh` already does).
 ### 9. Defaults that write inside this repo
 
 The repo is meant to be immutable — replaceable wholesale on an upgrade — but
-six paths default to writing into it. All are gitignored, so `git status` stays
-clean and the breakage is invisible until someone replaces the tree.
+several paths defaulted to writing into it. All were gitignored, so `git status`
+stayed clean and the breakage stayed invisible until someone replaced the tree.
+
+Mostly closed. Still open:
 
 | Path | Written by | Default that puts it here |
 | --- | --- | --- |
-| `tmp/testkit/receipts/` | `import.sh` via the testkit | `TESTKIT_ROOT=$ROOT/tmp/testkit` (`testkit/init.sh:6`, `run.sh:6`) |
-| `tmp/testkit/artifacts/` | collector/warehouse/reconcile | same |
-| `tmp/testkit/config/`, `*.env` | `testkit/init.sh` | same |
-| `workloads/warehouse/.env` | operator | `ENV_FILE="${WAREHOUSE_ENV_FILE:-${SCRIPT_DIR}/.env}"` (`run.sh:9`) |
-| `workloads/warehouse/config/` | operator | `WAREHOUSE_CONFIG_DIR="${…:-${SCRIPT_DIR}/config}"` (`run.sh:51`) |
-| `metabase/compose/.env` | operator | Compose's own `.env` beside the spec |
-| `tars/` | `images/airgap/pull-and-save.sh` | relative `./tars` (`load.sh:16`) |
-| `metabase/tf/provider-mirror/` | `terraform providers mirror` | `tf/provider-mirror` |
+| `metabase/compose/.env` | operator | Compose's own `.env` beside the spec (`metabase/compose/README.md:60`) |
+| `metabase/tf/provider-mirror/` | `terraform providers mirror` | relative `provider-mirror/` (`metabase/tf/README.md:50`) |
 
-Ranked by what actually hurts:
-
-1. **Receipts.** `import-orchestration.md` calls them the durable record of an
-   import and the only hand-off object between tasks — audit evidence. They
-   must not live in a tree that gets deleted on upgrade. Even in the testkit
-   they should default outside the repo.
-2. **`workloads/warehouse` defaults.** Both the env file and the config dir
-   default in-tree, so an operator who ignores the README puts customer config
-   and a DSN inside the vendor tree. The README now says to use
-   `WAREHOUSE_ENV_FILE`, but the default still leads the other way. Default to
-   `$AUTONOX_HOME` and fail with a clear message when unset.
-3. **`metabase/compose/.env`** — same as the postgres one already fixed; the
-   Compose `--env-file` treatment applies unchanged.
-4. **`tars/` and `provider-mirror/`** — large build outputs. Regenerable, so
-   losing them is cheap, but they still make the tree non-replaceable in place.
-
-Fix shape is the same one already applied to `postgres/compose` and
-`workloads/warehouse`'s documentation: default to `$AUTONOX_HOME`, keep
+Both take the shape already applied elsewhere: default to `$AUTONOX_HOME`, keep
 generated output under `$AUTONOX_HOME/var/`, and never resolve a writable path
-relative to the script.
+relative to the script. The Compose one is the same `--env-file` treatment
+`postgres/compose` already got. `provider-mirror/` is a regenerable build
+output, so losing it is cheap — it just makes the tree non-replaceable in place.
 
-Two stale leftovers exist right now from earlier runs and should be deleted:
-`workloads/warehouse/.env` (no `WAREHOUSE_IMAGE`, wrong password) and
-`metabase/compose/.env`.
+One stale leftover exists right now and should be deleted: `metabase/compose/.env`.
+
+**Fixed since this was written**, all verified in the current tree:
+
+- **Receipts, artifacts and testkit config** — the entry that mattered most,
+  because `import-orchestration.md` calls receipts durable audit evidence and
+  they must not sit in a tree that gets deleted on upgrade. `TESTKIT_ROOT` now
+  defaults to `${AUTONOX_HOME:-$HOME/.autonox}/var/testkit` in both
+  `testkit/init.sh` and `testkit/run.sh`, each carrying a comment saying why.
+  `import.sh` never had an in-repo default: `RECEIPT_DIR` is required
+  (`import.sh:117`, `:516`) and `.env.example:95` points at
+  `/srv/autonox/import-receipts`.
+- **`workloads/warehouse` env file and config dir** — `run.sh` refuses to start
+  unless `AUTONOX_HOME` or `WAREHOUSE_ENV_FILE` is set (`run.sh:13-18`), and
+  `WAREHOUSE_CONFIG_DIR` resolves under `$AUTONOX_HOME` (`run.sh:66`). The
+  `workloads/warehouse/.env` leftover named here is gone.
+- **`tars/`** — `images/airgap/pull-and-save.sh` and `images/airgap/load.sh`
+  both require the bundle directory as an argument and exit 2 without one,
+  telling the caller to keep bundles outside the repository.
 
 ### 10. mock-hr is a smoke test, not a fixture
 

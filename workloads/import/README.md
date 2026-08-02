@@ -9,13 +9,31 @@ commit, Silver intent emission, Reconciliation, and Silver finalization.
 CLI in an ephemeral Docker/Podman container and has no customer-specific paths,
 images, credentials, or runtime mounts.
 
+Settings live outside this repository, in `$AUTONOX_HOME` (conventionally
+`/etc/autonox`) — the same place `workloads/warehouse` reads from. This tree is
+vendor-supplied and gets replaced wholesale on upgrade, so nothing an operator
+writes belongs inside it, least of all a DSN.
+
+`.env.example` is one file covering two halves: the deployment-wide settings and
+the ones that differ per source system. Split it accordingly.
+
 ```bash
 cd workloads/import
-cp .env.example .env
-# Fill in immutable image digests, existing configuration references, and paths.
-set -a; source .env; set +a
-./import.sh start
+export AUTONOX_HOME="${AUTONOX_HOME:-/etc/autonox}"
+mkdir -p "$AUTONOX_HOME/sources"
+
+cp .env.example "$AUTONOX_HOME/import.env"        # keep the deployment-wide half
+cp .env.example "$AUTONOX_HOME/sources/hr.env"    # keep the per-source half
+chmod 600 "$AUTONOX_HOME/import.env" "$AUTONOX_HOME"/sources/*.env
+
+./run-import.sh hr start
 ```
+
+`run-import.sh` is the entry point; `import.sh` is what it drives. Invoking the
+driver directly is supported and is what the testkit does, but then composing
+the environment correctly — and not leaking one source's settings into the next
+run — becomes the caller's problem. The next section is why that is harder than
+it looks.
 
 ## One source per run
 
@@ -50,8 +68,10 @@ takes one lock per workspace, not per source (`silver_workspace_locks` keys on
 fails after emitting intents keeps the lock until it expires — 7200s by default
 — so leave real headroom between sources.
 
-The script requires `jq`, a SHA-256 utility, and the configured container
-runtime. Every image must be pinned by digest. It writes immutable receipt
+The script requires **bash ≥ 4.3**, `jq`, a SHA-256 utility, and the configured
+container runtime. The bash floor is a nameref (`local -n` in `read_nul_array`),
+so macOS stock bash 3.2 fails — use Homebrew's bash there. Every image must be
+pinned by digest. It writes immutable receipt
 versions below `RECEIPT_DIR/<orchestration_run_id>/`; use the latest receipt
 there for safe inspection or recovery:
 

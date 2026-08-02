@@ -39,11 +39,23 @@ Every workload assumes:
 
 ## Running a standalone workload (example shape)
 
+Settings live in `$AUTONOX_HOME` (conventionally `/etc/autonox`), never in this
+repository — it is a vendor tree replaced wholesale on upgrade, so anything an
+operator writes into it is lost on the next one, silently.
+
 ```bash
-cd workloads/warehouse
-cp .env.example .env       # fill in the required connection settings
-bash run.sh
+export AUTONOX_HOME=/etc/autonox
+
+cp workloads/warehouse/.env.example "$AUTONOX_HOME/warehouse.env"
+chmod 600 "$AUTONOX_HOME/warehouse.env"           # it holds a DSN
+bash workloads/warehouse/run.sh upgrade-workspace
+
+cp workloads/import/.env.example "$AUTONOX_HOME/import.env"
+bash workloads/import/run-import.sh hr start
 ```
+
+Each workload's README covers its own settings; import splits its env file into
+a deployment-wide half and one file per source system.
 
 For Kubernetes, equivalent invocations are typically packaged as `CronJob`s
 in the customer overlay; the same env vars apply.
