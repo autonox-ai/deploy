@@ -19,9 +19,8 @@
 #                does not survive the round trip — so on an air-gapped host the
 #                lock written by pull-and-save.sh is the only record of them.
 #
-# The warehouse image is emitted twice: workloads/warehouse reads WAREHOUSE_IMAGE
-# and workloads/import reads WAREHOUSE_IMG (TODO.md 6c). One value, two names,
-# so there is still only one place to change it.
+# Both workloads read the same three names, so one images.env serves the
+# warehouse migrations and every import.
 
 set -Eeuo pipefail
 
@@ -54,9 +53,9 @@ done
 # Prefix in manifest.txt -> variable names it populates.
 names_for() {
   case "$1" in
-    collectors)        printf 'COLLECTOR_IMG' ;;
-    autonox-warehouse) printf 'WAREHOUSE_IMG WAREHOUSE_IMAGE' ;;
-    reconciliation)    printf 'RECONCILE_IMG' ;;
+    collectors)        printf 'COLLECTOR_IMAGE' ;;
+    autonox-warehouse) printf 'WAREHOUSE_IMAGE' ;;
+    reconciliation)    printf 'RECONCILE_IMAGE' ;;
   esac
 }
 

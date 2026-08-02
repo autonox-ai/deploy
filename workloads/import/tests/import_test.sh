@@ -20,9 +20,9 @@ chmod +x "$TMP/bin/fake-runtime"
 
 export TENANT_ID=test ENVIRONMENT=test WORKSPACE_ID=ws SYSTEM_INSTANCE_ID=oracle TARGET_REF=warehouse/ws
 export CONTAINER_RUNTIME="$TMP/bin/fake-runtime" FAKE_RUNTIME_LOG="$TMP/runtime.log"
-export COLLECTOR_IMG='example/collectors@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-export WAREHOUSE_IMG='example/warehouse@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-export RECONCILE_IMG='example/reconcile@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+export COLLECTOR_IMAGE='example/collectors@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+export WAREHOUSE_IMAGE='example/warehouse@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+export RECONCILE_IMAGE='example/reconcile@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
 export RECEIPT_DIR="$TMP/receipts" ARTIFACT_URI_PREFIX='shared://test' ARTIFACT_HOST_ROOT="$TMP/artifacts"
 export COLLECTOR_ARTIFACT_PATH_PREFIX=/output WAREHOUSE_ARTIFACT_PATH_PREFIX=/output RECONCILE_ARTIFACT_PATH_PREFIX=/output
 export COLLECTOR_SPEC="$TMP/config/collector.yaml" CONNECTION_CATALOG="$TMP/config/catalog.yaml" COLLECTOR_ROOT_URI=/output

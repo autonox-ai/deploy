@@ -252,7 +252,7 @@ The duplication is the price, and it is small — four values, not four files:
 | Value | Duplicated across |
 | --- | --- |
 | `WORKSPACE_ID` | warehouse, import |
-| warehouse image | warehouse `WAREHOUSE_IMAGE`, import `WAREHOUSE_IMG` |
+| warehouse image | ~~warehouse `WAREHOUSE_IMAGE`, import `WAREHOUSE_IMG`~~ — **done**, both read `WAREHOUSE_IMAGE` from one `images.env` |
 | noxop DSN | warehouse `WAREHOUSE_POSTGRES_DSN`, import (allow-listed via `*_CONTAINER_ENV_NAMES`) |
 | docker network | warehouse `CONTAINER_NETWORK`, metabase `METABASE_DOCKER_NETWORK`, import (inside `*_CONTAINER_RUN_ARGS`) |
 
@@ -261,10 +261,13 @@ Metabase's `MB_DB_*` is not duplication either: it connects as `bireader`.
 
 What to fix is the **naming**, not the file count:
 
-- `WAREHOUSE_IMAGE` vs `WAREHOUSE_IMG` for the same image is what allowed a
-  migrate and an import to run different versions of it (see item 6). Pick one.
+- ~~`WAREHOUSE_IMAGE` vs `WAREHOUSE_IMG`~~ **Done.** The import triplet is now
+  `COLLECTOR_IMAGE` / `WAREHOUSE_IMAGE` / `RECONCILE_IMAGE`, matching the
+  warehouse workload, and `images/resolve-digests.sh` writes all three — so the
+  value that let a migrate and an import run different versions of the same
+  image (item 6) now exists in one place.
 - Three spellings of "the docker network" means an operator cannot grep their
-  configuration for one concept.
+  configuration for one concept. Still open.
 
 Accept one breaking rename now. Operators who want shared values can layer
 files themselves — `set -a; source common.env; source warehouse.env; set +a`

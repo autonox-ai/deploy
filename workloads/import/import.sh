@@ -91,7 +91,7 @@ validate_runtime_list() {
 
 validate_inputs() {
   require_command jq; require_command "$CONTAINER_RUNTIME"; require_command mktemp; require_command od
-  for image in "$COLLECTOR_IMG" "$WAREHOUSE_IMG" "$RECONCILE_IMG"; do
+  for image in "$COLLECTOR_IMAGE" "$WAREHOUSE_IMAGE" "$RECONCILE_IMAGE"; do
     is_digest_image "$image" || die "image must be pinned by digest: $image"
   done
   for tool in COLLECTOR WAREHOUSE RECONCILE; do validate_runtime_list "$tool"; done
@@ -272,7 +272,7 @@ check_manifest() {
 }
 
 collector_stage() {
-  run_task collect COLLECTOR "$COLLECTOR_IMG" run --spec "$COLLECTOR_SPEC" --connection-catalog "$CONNECTION_CATALOG" --root-uri "$COLLECTOR_ROOT_URI"
+  run_task collect COLLECTOR "$COLLECTOR_IMAGE" run --spec "$COLLECTOR_SPEC" --connection-catalog "$CONNECTION_CATALOG" --root-uri "$COLLECTOR_ROOT_URI"
   assert_json "$TASK_RESULT" '.run_id | type == "string" and length > 0' "collector result is missing run_id"
   assert_json "$TASK_RESULT" '(.status // .report.status) == "SUCCESS"' "collector result is not successful"
   local run_id manifest_uri report_uri report_hash
@@ -294,13 +294,13 @@ bronze_stage() {
   local run_id manifest_uri manifest_path manifest_hash
   run_id="$(jq -r '.collector.run_id' "$STATE_FILE")"; manifest_uri="$(jq -r '.collector.manifest.uri' "$STATE_FILE")"
   manifest_hash="$(jq -r '.collector.manifest.sha256' "$STATE_FILE")"; manifest_path="$(uri_to_container_path WAREHOUSE "$manifest_uri")"
-  run_task bronze_register WAREHOUSE "$WAREHOUSE_IMG" bronze register-manifest --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id" --manifest "$manifest_path"
+  run_task bronze_register WAREHOUSE "$WAREHOUSE_IMAGE" bronze register-manifest --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id" --manifest "$manifest_path"
   assert_json "$TASK_RESULT" --arg run "$run_id" --arg hash "$manifest_hash" '.run_id == $run and ((.manifest_sha256 // .manifest_hash) | sub("^sha256:"; "")) == $hash' "Bronze manifest registration does not match receipt"
   record_event bronze_register succeeded "$TASK_RESULT" "$TASK_LOG" 0 "manifest registered"
-  run_task bronze_stage WAREHOUSE "$WAREHOUSE_IMG" bronze stage-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
+  run_task bronze_stage WAREHOUSE "$WAREHOUSE_IMAGE" bronze stage-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
   assert_json "$TASK_RESULT" --arg run "$run_id" '.run_id == $run and ((.staging_ref // .staging_evidence) != null) and ((.staging_hash // .staging_sha256) != null)' "Bronze staging evidence is missing or mismatched"
   record_event bronze_stage succeeded "$TASK_RESULT" "$TASK_LOG" 0 "staging evidence recorded"
-  run_task bronze_commit WAREHOUSE "$WAREHOUSE_IMG" bronze commit-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
+  run_task bronze_commit WAREHOUSE "$WAREHOUSE_IMAGE" bronze commit-run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run_id"
   assert_json "$TASK_RESULT" --arg ws "$WORKSPACE_ID" --arg run "$run_id" '(.workspace_id // .workspace) == $ws and .run_id == $run and (.state // .status) == "COMMITTED"' "Bronze run is not committed"
   record_event bronze_commit succeeded "$TASK_RESULT" "$TASK_LOG" 0 "Bronze committed"
 }
@@ -311,7 +311,7 @@ silver_stage() {
   intents_uri="${INTENTS_URI:-${ARTIFACT_URI_PREFIX}/intents/${silver_run}.jsonl}"
   intents_path="$(uri_to_container_path WAREHOUSE "$intents_uri")"
   mkdir -p "$(dirname "$(uri_to_host_path "$intents_uri")")"
-  run_task silver WAREHOUSE "$WAREHOUSE_IMG" silver run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --system-instance-id "$SYSTEM_INSTANCE_ID" --bronze-run-id "$bronze_run" --flow-spec "$FLOW_SPEC" --banding-spec "$BANDING_SPEC" --run-id "$silver_run" --intents-output-path "$intents_path"
+  run_task silver WAREHOUSE "$WAREHOUSE_IMAGE" silver run --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --system-instance-id "$SYSTEM_INSTANCE_ID" --bronze-run-id "$bronze_run" --flow-spec "$FLOW_SPEC" --banding-spec "$BANDING_SPEC" --run-id "$silver_run" --intents-output-path "$intents_path"
   assert_json "$TASK_RESULT" --arg run "$silver_run" '.run_id == $run and .status == "intents_emitted" and (.mapper_handoff.status // .mapper_handoff.emission_status) == "succeeded"' "Silver did not emit a successful handoff for the preallocated run"
   local host; host="$(uri_to_host_path "$intents_uri")"; [[ -f "$host" ]] || die "Silver intent JSONL is unavailable through ARTIFACT_HOST_ROOT"
   count="$(awk 'END { print NR + 0 }' "$host")"; hash="$(sha256_file "$host")"
@@ -333,14 +333,14 @@ reconcile_stage() {
     record_event reconcile_run succeeded "" "" 0 "explicit zero-intent no-op"
     publish_receipt >/dev/null; return
   fi
-  run_task reconcile_validate RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" validate --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
+  run_task reconcile_validate RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" validate --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
   assert_json "$TASK_RESULT" --argjson count "$count" '.ok == true and ((.summary.processed // .processed) | tonumber) == $count' "Reconciliation validation did not process the complete frozen intent set"
   record_event reconcile_validate succeeded "$TASK_RESULT" "$TASK_LOG" 0 "complete frozen JSONL validated"
   validate_result="$TASK_RESULT"
-  run_task reconcile_run RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" run --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
+  run_task reconcile_run RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" run --intents "$intents_path" --target-ref "$TARGET_REF" --execution-group "$group" --max-intents "$count"
   assert_json "$TASK_RESULT" --argjson count "$count" '(.summary.processed // .processed | tonumber) == $count and (.summary.errors // .errors // 0 | tonumber) == 0' "Reconciliation did not successfully process every intent"
   record_event reconcile_run succeeded "$TASK_RESULT" "$TASK_LOG" 0 "reconciliation run completed"
-  run_task reconciliation_evidence RECONCILE "$RECONCILE_IMG" --wiring "$RECONCILE_WIRING" get execution-group --workspace-id "$WORKSPACE_ID" --target-ref "$TARGET_REF" --execution-group "$group"
+  run_task reconciliation_evidence RECONCILE "$RECONCILE_IMAGE" --wiring "$RECONCILE_WIRING" get execution-group --workspace-id "$WORKSPACE_ID" --target-ref "$TARGET_REF" --execution-group "$group"
   assert_json "$TASK_RESULT" --argjson count "$count" '(.counts.attempted // .attempted | tonumber) == $count and (.counts.succeeded // .succeeded | tonumber) == $count and ((.counts.failed // .failed // 0) | tonumber) == 0 and (.group_outcome == "succeeded" or .fully_succeeded == true)' "execution-group evidence is incomplete"
   if [[ "$COMPLETION_POLICY" == "observed_converged" ]]; then
     assert_json "$TASK_RESULT" '(.summary.converged // .converged // false) == true' "execution-group lacks converged observation evidence"
@@ -350,7 +350,7 @@ reconcile_stage() {
 
 finalize_stage() {
   local run; run="$(jq -r '.silver.run_id' "$STATE_FILE")"
-  run_task silver_finalize WAREHOUSE "$WAREHOUSE_IMG" silver finalize --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run"
+  run_task silver_finalize WAREHOUSE "$WAREHOUSE_IMAGE" silver finalize --wiring "$WAREHOUSE_WIRING" --workspace-id "$WORKSPACE_ID" --run-id "$run"
   assert_json "$TASK_RESULT" --arg run "$run" --arg ws "$WORKSPACE_ID" '.run_id == $run and .workspace_id == $ws and .status == "ok"' "Silver finalization did not complete the expected run"
   record_event silver_finalize succeeded "$TASK_RESULT" "$TASK_LOG" 0 "Silver completed and lock released"
   state_update '.status = "completed" | .completed_at = $now' --arg now "$(date -u +%FT%TZ)"
@@ -378,7 +378,7 @@ init_state() {
   local config_json collector_hash catalog_hash warehouse_hash flow_hash banding_hash reconcile_hash
   collector_hash="$(require_config COLLECTOR_SPEC)"; catalog_hash="$(require_config CONNECTION_CATALOG)"; warehouse_hash="$(require_config WAREHOUSE_WIRING)"; flow_hash="$(require_config FLOW_SPEC)"; banding_hash="$(require_config BANDING_SPEC)"; reconcile_hash="$(require_config RECONCILE_WIRING)"
   config_json="$(jq -cn --arg collector_ref "$COLLECTOR_SPEC" --arg collector_sha "$collector_hash" --arg catalog_ref "$CONNECTION_CATALOG" --arg catalog_sha "$catalog_hash" --arg warehouse_ref "$WAREHOUSE_WIRING" --arg warehouse_sha "$warehouse_hash" --arg flow_ref "$FLOW_SPEC" --arg flow_sha "$flow_hash" --arg banding_ref "$BANDING_SPEC" --arg banding_sha "$banding_hash" --arg reconcile_ref "$RECONCILE_WIRING" --arg reconcile_sha "$reconcile_hash" '{collector_spec:{ref:$collector_ref,sha256:$collector_sha},connection_catalog:{ref:$catalog_ref,sha256:$catalog_sha},warehouse_wiring:{ref:$warehouse_ref,sha256:$warehouse_sha},flow_spec:{ref:$flow_ref,sha256:$flow_sha},banding_spec:{ref:$banding_ref,sha256:$banding_sha},reconcile_wiring:{ref:$reconcile_ref,sha256:$reconcile_sha}}')"
-  jq -cn --argjson version "$RECEIPT_SCHEMA_VERSION" --arg orchestration "$ORCHESTRATION_RUN_ID" --arg silver "$SILVER_RUN_ID" --arg tenant "$TENANT_ID" --arg environment "$ENVIRONMENT" --arg workspace "$WORKSPACE_ID" --arg system "$SYSTEM_INSTANCE_ID" --arg target "$TARGET_REF" --arg collector_img "$COLLECTOR_IMG" --arg warehouse_img "$WAREHOUSE_IMG" --arg reconcile_img "$RECONCILE_IMG" --arg group "silver/$SILVER_RUN_ID" --arg policy "$COMPLETION_POLICY" --arg now "$(date -u +%FT%TZ)" --argjson config "$config_json" \
+  jq -cn --argjson version "$RECEIPT_SCHEMA_VERSION" --arg orchestration "$ORCHESTRATION_RUN_ID" --arg silver "$SILVER_RUN_ID" --arg tenant "$TENANT_ID" --arg environment "$ENVIRONMENT" --arg workspace "$WORKSPACE_ID" --arg system "$SYSTEM_INSTANCE_ID" --arg target "$TARGET_REF" --arg collector_img "$COLLECTOR_IMAGE" --arg warehouse_img "$WAREHOUSE_IMAGE" --arg reconcile_img "$RECONCILE_IMAGE" --arg group "silver/$SILVER_RUN_ID" --arg policy "$COMPLETION_POLICY" --arg now "$(date -u +%FT%TZ)" --argjson config "$config_json" \
     '{schema_version:$version,receipt_sequence:0,status:"running",orchestration_run_id:$orchestration,created_at:$now,updated_at:$now,identity:{tenant_id:$tenant,environment:$environment,workspace_id:$workspace,system_instance_id:$system,target_ref:$target},images:{collector:$collector_img,warehouse:$warehouse_img,reconciliation:$reconcile_img},configuration:$config,collector:{},silver:{run_id:$silver},reconciliation:{execution_group:$group,completion_policy:$policy},tasks:{}}' >"$STATE_FILE"
   publish_receipt >/dev/null
 }
@@ -394,7 +394,7 @@ load_state() {
 
 preflight_stage() {
   local inspect_log="${RUN_DIR}/preflight-image-inspect.json"
-  "$CONTAINER_RUNTIME" image inspect "$COLLECTOR_IMG" "$WAREHOUSE_IMG" "$RECONCILE_IMG" >"$inspect_log" 2>&1 || die "one or more configured images are unavailable to $CONTAINER_RUNTIME"
+  "$CONTAINER_RUNTIME" image inspect "$COLLECTOR_IMAGE" "$WAREHOUSE_IMAGE" "$RECONCILE_IMAGE" >"$inspect_log" 2>&1 || die "one or more configured images are unavailable to $CONTAINER_RUNTIME"
   record_event preflight succeeded "$inspect_log" "$inspect_log" 0 "configuration, artifact storage, and image availability verified"
 }
 
@@ -421,7 +421,7 @@ main() {
   # docker, matching workloads/warehouse/run.sh and the testkit. Set
   # CONTAINER_RUNTIME=podman where that is the runtime.
   : "${CONTAINER_RUNTIME:=docker}"; : "${COMPLETION_POLICY:=observed_converged}"
-  for var in TENANT_ID ENVIRONMENT WORKSPACE_ID SYSTEM_INSTANCE_ID TARGET_REF COLLECTOR_IMG WAREHOUSE_IMG RECONCILE_IMG RECEIPT_DIR ARTIFACT_URI_PREFIX ARTIFACT_HOST_ROOT COLLECTOR_ARTIFACT_PATH_PREFIX WAREHOUSE_ARTIFACT_PATH_PREFIX RECONCILE_ARTIFACT_PATH_PREFIX COLLECTOR_SPEC CONNECTION_CATALOG COLLECTOR_ROOT_URI WAREHOUSE_WIRING FLOW_SPEC BANDING_SPEC RECONCILE_WIRING; do require_var "$var"; done
+  for var in TENANT_ID ENVIRONMENT WORKSPACE_ID SYSTEM_INSTANCE_ID TARGET_REF COLLECTOR_IMAGE WAREHOUSE_IMAGE RECONCILE_IMAGE RECEIPT_DIR ARTIFACT_URI_PREFIX ARTIFACT_HOST_ROOT COLLECTOR_ARTIFACT_PATH_PREFIX WAREHOUSE_ARTIFACT_PATH_PREFIX RECONCILE_ARTIFACT_PATH_PREFIX COLLECTOR_SPEC CONNECTION_CATALOG COLLECTOR_ROOT_URI WAREHOUSE_WIRING FLOW_SPEC BANDING_SPEC RECONCILE_WIRING; do require_var "$var"; done
   validate_inputs
   if [[ "$action" == start ]]; then
     ORCHESTRATION_RUN_ID="${ORCHESTRATION_RUN_ID:-$(new_id import)}"; SILVER_RUN_ID="${SILVER_RUN_ID:-$(new_id silver)}"; RUN_DIR="${RECEIPT_DIR%/}/${ORCHESTRATION_RUN_ID}"
