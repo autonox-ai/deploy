@@ -18,7 +18,7 @@
 # Run (init only — usually not needed because the image is pre-initialized):
 #   docker run --rm ghcr.io/autonox-ai/metabase-terraform init -backend=false
 
-FROM hashicorp/terraform:1.9
+FROM hashicorp/terraform:1.9.8
 
 WORKDIR /work/tf
 

@@ -30,9 +30,9 @@ The bundle directory becomes self-describing: one `.tar` per image
 underscores), plus a **`bundle.lock`** recording, for each manifest entry, the
 resolved image ID, the registry digest, and the tar it lives in.
 
-`pull-and-save.sh` always pulls before deciding anything. A tag can be
-repointed upstream — `metabase/metabase:v0.58.x` and `hashicorp/terraform:1.9`
-are rolling tags today — so the presence of a tar says nothing about whether it
+`pull-and-save.sh` always pulls before deciding anything. Every entry in
+`manifest.txt` is pinned to an immutable tag, but a tag is still a name a
+publisher can repoint, so the presence of a tar says nothing about whether it
 holds what the manifest currently resolves to. If the pulled image ID still
 matches `bundle.lock` the save is skipped (`keep`); if it has moved, the tar is
 rebuilt (`stale ... re-saving`).

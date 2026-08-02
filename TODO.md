@@ -285,8 +285,9 @@ Drop the pin and resolve the container through Compose (`run.sh` already does).
   Find out why root is needed, comment it, or drop it.
 - `testkit/init.sh:153` — `warehouse_volumes` mounts the config dir twice now
   that import and warehouse config resolved to the same directory.
-- `images/manifest.txt:30` — `metabase/metabase:v0.58.x` is a floating tag,
-  contradicting the file's own "Tags are immutable; never use `:latest`".
+- ~~`images/manifest.txt:30` — `metabase/metabase:v0.58.x` is a floating tag~~
+  **Done.** Pinned to `v0.58.22`, and `hashicorp/terraform:1.9` to `1.9.8`, in
+  the manifest and in the five other places that named them.
 - `images/manifest.txt` — `autonox-warehouse` is pinned to latest `main`; that
   package has no release channel, only branch tags, unlike `collectors` and
   `reconciliation` which carry `enterprise`. Confirm that is intended.

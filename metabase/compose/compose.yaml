@@ -3,7 +3,7 @@ name: autonox-metabase
 services:
   metabase:
     container_name: nox-metabase
-    image: ${METABASE_IMAGE:-metabase/metabase:v0.58.x}
+    image: ${METABASE_IMAGE:-metabase/metabase:v0.58.22}
     restart: unless-stopped
     environment:
       MB_DB_TYPE: ${MB_DB_TYPE:-postgres}
