@@ -150,6 +150,41 @@ needed, rather than at document-validation time.
 
 Follow-up in this repo once it ships: **6b**.
 
+### 3c. CLI JSON output is unversioned, so the orchestrator hedges
+
+`import.sh` carries 22 `//` fallbacks across its task assertions
+(`import.sh:270-350`) — `.state // .status`,
+`.manifest_sha256 // .manifest_hash`, `.workspace_id // .workspace`,
+`.staging_ref // .staging_evidence`. Each one is the orchestrator not knowing
+which CLI version it is talking to and accepting both shapes.
+
+That is a silent wrong-data risk, not cosmetics: bump `manifest.txt`, the output
+shape changes, and a hedge picks the wrong branch or an assertion passes when it
+should not. The assertions are the only thing standing between a half-committed
+Bronze run and a receipt that says everything succeeded.
+
+**Ask:** version the JSON output contracts in collectors, warehouse and
+reconciliation. Then `import.sh` asserts the contract version it requires once,
+at startup, fails loudly on a mismatch, and the 22 hedges delete themselves.
+Item **6** is the same skew seen from the warehouse side.
+
+> **Rejected: moving the orchestrator into an image.** An earlier framing of
+> this called for `import.sh` to become `autonox import` or ship as its own
+> entry in `manifest.txt`, on the grounds that 438 lines of correctness-critical
+> state machine should not ship as a repo file while the CLIs it drives ship as
+> digests.
+>
+> Relocation does not fix the skew, it moves it — four mutually compatible
+> images instead of three plus a script. A subcommand would put the driver
+> inside one of the images it spawns. Its own image needs Docker-in-Docker or a
+> mounted container socket, which many customers forbid, and adds another tar to
+> the air-gap bundle. Both also cost the property worth keeping: the
+> orchestrator is the one component a customer can read, audit and patch without
+> a rebuild, which for software that writes access decisions is a feature.
+>
+> Once the contracts are versioned, where the orchestrator lives is a
+> preference, not a correctness question.
+
 ## This repo
 
 ### 4. Customer config still written in-tree
