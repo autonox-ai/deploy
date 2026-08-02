@@ -10,9 +10,9 @@
 # Build:
 #   docker build -t ghcr.io/autonox-ai/metabase-terraform -f tf-runner/Dockerfile .
 #
-# Run (apply):
+# Run (apply) — variables come from $AUTONOX_HOME, never from this repo:
 #   docker run --rm --network=host \
-#     -v $(pwd)/terraform.tfvars:/work/tf/terraform.tfvars:ro \
+#     -v "$AUTONOX_HOME/metabase.tfvars:/work/tf/terraform.tfvars:ro" \
 #     ghcr.io/autonox-ai/metabase-terraform apply -auto-approve
 #
 # Run (init only — usually not needed because the image is pre-initialized):

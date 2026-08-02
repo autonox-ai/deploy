@@ -1,4 +1,7 @@
-# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+# Copy to $AUTONOX_HOME/metabase.tfvars — not into this repo — fill it in, and
+# pass it with -var-file:
+#   terraform -chdir=metabase/tf apply -var-file="$AUTONOX_HOME/metabase.tfvars"
+# It holds two passwords: chmod 600 the copy.
 
 # --- Metabase admin credentials (created during the first-login flow) ---
 metabase_host     = "http://localhost:3000"

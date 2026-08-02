@@ -10,7 +10,11 @@ customer's situation.
   deployments using their own environment overlays (namespace, storage,
   sizing, secrets).
 - **Nothing here should require editing vendor files.** Override via
-  Kustomize overlays/patches, `.env` files, or Terraform variables.
+  Kustomize overlays/patches, env files, or Terraform variables.
+- **Customer config lives outside this tree**, in `$AUTONOX_HOME` (default
+  `/etc/autonox`) or in the customer's own Git repository for Kubernetes
+  overlays. This repo is replaced wholesale on upgrade; anything written into
+  it is lost. Generated output goes to `$AUTONOX_HOME/var/`.
 - **No baked-in secrets.** Every credential is sourced from a
   customer-managed file or Kubernetes Secret.
 

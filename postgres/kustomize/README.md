@@ -23,15 +23,25 @@ from inside the cluster, so apply them against the running pod instead
 secret):
 
 ```bash
+export AUTONOX_HOME="${AUTONOX_HOME:-/etc/autonox}"
+
 oc exec -i pgvector-0 -- psql -U "$PG_ADMIN_USER" -d autonox \
   -v noxop_password="$NOXOP_PASSWORD" \
   -v noxreader_password="$NOXREADER_PASSWORD" \
   -v bireader_password="$BIREADER_PASSWORD" \
-  < ../bootstrap/passwords.sql
+  < postgres/bootstrap/passwords.sql
 
-WS_NAME=prod envsubst < ../bootstrap/ws_setup.sql.tmpl > ws_prod_setup.sql
-oc exec -i pgvector-0 -- psql -U "$PG_ADMIN_USER" -d autonox < ws_prod_setup.sql
+mkdir -p "$AUTONOX_HOME/var/sql"
+WS_NAME=prod envsubst < postgres/bootstrap/ws_setup.sql.tmpl \
+  > "$AUTONOX_HOME/var/sql/ws_prod_setup.sql"
+oc exec -i pgvector-0 -- psql -U "$PG_ADMIN_USER" -d autonox \
+  < "$AUTONOX_HOME/var/sql/ws_prod_setup.sql"
 ```
+
+Run these from the repository root. Rendered SQL goes to `$AUTONOX_HOME/var/`
+(default `/etc/autonox/var/`), never into this repository — same reason as the
+overlay below: the tree is vendor content, replaced wholesale on upgrade.
+Everything under `var/` is output and safe to delete.
 
 Replace `oc` with `kubectl` on plain Kubernetes.
 
@@ -53,11 +63,14 @@ A Kubernetes `Secret` named **`pgvector-db`** with the following keys:
 > Do **not** commit real secrets to Git. Use your organization's secret
 > management solution (Vault, ExternalSecrets, SealedSecrets, etc.).
 
-An example secret manifest is provided in:
+A template secret manifest is provided in:
 
 ```
 examples/customer-overlay/secret.pgvector-db.example.yaml
 ```
+
+It is a template, not a manifest to apply: copy it out of this repository
+first, drop the `.example`, and replace `change-me`.
 
 ## Image version pinning
 
@@ -77,19 +90,34 @@ Vendor/customer separation:
 - **This repository** (`autonox-ai/deploy`) is read-only vendor content.
 - **Your repository** contains environment-specific overlays and secrets.
 
-Deploy pgvector by creating a customer-owned overlay.
+Deploy pgvector by creating a customer-owned overlay. Everything under
+`examples/` is a template to copy out — never your overlay. Editing it in place
+and running `oc apply -k` from inside this repository puts your namespace,
+storage sizing and secret into vendor content that the next upgrade replaces
+wholesale.
 
 ### Step 1: Create a customer-owned overlay folder
 
-In your own Git repository, create a folder for this deployment, e.g.
-`acme-pgvector`, `prod-pgvector`. Start by copying the provided example:
+Put the overlay in your own Git repository — a folder for this deployment, e.g.
+`acme-pgvector`, `prod-pgvector`:
 
 ```bash
 cp -r postgres/kustomize/examples/customer-overlay ./acme-pgvector
 cd acme-pgvector
 ```
 
-Your overlay folder should contain:
+If there is no customer Git repository, put it under `$AUTONOX_HOME` instead —
+the same directory the Compose bundle and the workloads read their
+configuration from (default `/etc/autonox`), so it survives a repo upgrade:
+
+```bash
+export AUTONOX_HOME="${AUTONOX_HOME:-/etc/autonox}"
+mkdir -p "$AUTONOX_HOME/pgvector-overlay"
+cp -r postgres/kustomize/examples/customer-overlay/. "$AUTONOX_HOME/pgvector-overlay/"
+cd "$AUTONOX_HOME/pgvector-overlay"
+```
+
+Either way your overlay folder starts as:
 
 ```
 acme-pgvector/
@@ -99,11 +127,11 @@ acme-pgvector/
 
 ### Step 2: Bind your overlay to the vendor repository
 
-The example overlay uses **relative paths** that only work inside this repo.
-After copying it into your own repo, update `kustomization.yaml` to reference
-the vendor explicitly.
+The template uses **relative paths** that only resolve inside this repo, so the
+copy does not build until you point it at the vendor explicitly. That is
+deliberate: an overlay that keeps working in place is one nobody copies out.
 
-#### Replace this (example-relative path)
+#### Replace this (template-relative path)
 
 ```yaml
 resources:
@@ -117,15 +145,17 @@ resources:
 
 ```yaml
 resources:
-  - github.com/autonox-ai/deploy//postgres/kustomize/overlays/openshift?ref=v0.3.0
-  - secret.pgvector-db.example.yaml
+  - github.com/autonox-ai/deploy//postgres/kustomize/overlays/openshift?ref=<vendor-version>
+  - secret.pgvector-db.yaml
 ```
 
-This binds your overlay to a specific vendor version.
+This binds your overlay to a specific vendor version. Use the release ref the
+customer was delivered.
 
 ##### Option B — Vendored copy (air-gapped environments)
 
-Vendor the required files into your repository, e.g.:
+Vendor the required files next to your overlay — inside your repository, or
+under `$AUTONOX_HOME` if that is where the overlay lives:
 
 ```
 vendor/
@@ -140,7 +170,13 @@ Then reference them locally:
 ```yaml
 resources:
   - ../vendor/autonox-deploy/postgres/kustomize/overlays/openshift
-  - secret.pgvector-db.example.yaml
+  - secret.pgvector-db.yaml
+```
+
+Either way, rename the secret template as you fill it in:
+
+```bash
+mv secret.pgvector-db.example.yaml secret.pgvector-db.yaml
 ```
 
 ### Step 3: Set the namespace
@@ -173,13 +209,18 @@ patches:
 
 ### Step 5: Create the database secret
 
+Set a real `POSTGRES_PASSWORD` in `secret.pgvector-db.yaml` first — the
+template ships `change-me`. Better still, delete the file and have your secret
+manager create `pgvector-db` (Vault, ExternalSecrets, SealedSecrets), then drop
+it from `resources:`.
+
 ```bash
-oc apply -f secret.pgvector-db.example.yaml
+oc apply -f secret.pgvector-db.yaml
 ```
 
 ### Step 6: Deploy
 
-From your overlay directory:
+From your overlay directory — the copy, not this repository:
 
 ```bash
 oc apply -k .

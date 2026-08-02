@@ -1,6 +1,7 @@
 # Air-gapped / offline Terraform CLI config.
 #
-# Copy to ~/.terraformrc (or pass via TF_CLI_CONFIG_FILE) so that
+# Copy to $AUTONOX_HOME/terraformrc and pass it via TF_CLI_CONFIG_FILE (or to
+# ~/.terraformrc, which Terraform reads by default) so that
 # `terraform init` resolves the flovouin/metabase provider from the bundled
 # provider-mirror/ directory instead of reaching out to registry.terraform.io.
 #

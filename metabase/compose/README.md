@@ -19,17 +19,22 @@ This is **not** the AutoNox PostgreSQL bootstrap — see
 - shared network: `autonox-local`
 - PostgreSQL-backed Metabase metadata store (provisioned via `../bootstrap/`)
 
-## Step 1: provision the Metabase application database
+## Run Metabase
+
+Run every command below from the **repository root**. Nothing in this guide
+writes into the repository — see step 2.
+
+### Step 1: provision the Metabase application database
 
 Metabase needs its own database and role, separate from the AutoNox schemas.
 
 ```bash
 export METABASE_DB=metabase
 export METABASE_USER=metabase_user
-export METABASE_PASSWORD=secret
+export METABASE_PASSWORD='<metabase-password>'
 ```
 
-These values must match the Metabase Compose `.env` values used in step 2:
+These values must match the Metabase environment file written in step 2:
 
 - `METABASE_DB` → `MB_DB_DBNAME`
 - `METABASE_USER` → `MB_DB_USER`
@@ -53,20 +58,32 @@ This creates:
 - database `metabase` owned by `metabase_user`
 - `CREATE` access on schema `public`
 
-## Step 2: configure the Metabase environment
+### Step 2: configure the Metabase environment
+
+Configuration lives **outside this repository**, in a directory you own, so
+that upgrading AutoNox is "replace the repo, keep your config". This guide
+calls that directory `$AUTONOX_HOME` and defaults it to `/etc/autonox` — the
+same directory [`../../postgres/compose/README.md`](../../postgres/compose/README.md)
+and the workloads use.
 
 ```bash
-cd metabase/compose
-cp .env.example .env
+export AUTONOX_HOME="${AUTONOX_HOME:-/etc/autonox}"
+mkdir -p "$AUTONOX_HOME"
+cp metabase/compose/metabase.env.example "$AUTONOX_HOME/metabase.env"
+chmod 600 "$AUTONOX_HOME/metabase.env"
 ```
 
-Keep these values aligned with the database and role created in step 1:
+Keep these values in `$AUTONOX_HOME/metabase.env` aligned with the database and
+role created in step 1:
 
 ```bash
 MB_DB_DBNAME=metabase
 MB_DB_USER=metabase_user
-MB_DB_PASS=secret
+MB_DB_PASS=<metabase-password>
 ```
+
+**Required:** `MB_DB_PASS` ships empty on purpose — no baked-in secrets — and
+`docker compose up` refuses to start until it's set.
 
 Recommended defaults when using the bundled PostgreSQL container:
 
@@ -82,11 +99,29 @@ connect directly over the shared container network.
 Update `METABASE_IMAGE` to the exact approved image tag for the customer
 environment if needed.
 
-## Step 3: start Metabase
+Never edit files inside this repository. `git status --porcelain` (or a
+checksum of the tree) should stay empty after every step in this guide.
+
+### Step 3: start Metabase
 
 ```bash
+docker compose -f metabase/compose/compose.yaml \
+  --env-file "$AUTONOX_HOME/metabase.env" up -d
+```
+
+To drop the flags from every later command, export the path once — Compose
+reads it automatically (requires Compose v2.24+):
+
+```bash
+export COMPOSE_FILE="$PWD/metabase/compose/compose.yaml"
+export COMPOSE_ENV_FILES="$AUTONOX_HOME/metabase.env"
 docker compose up -d
 ```
+
+The rest of this guide assumes those two exports are set; without them, add
+`-f` and `--env-file` to each `docker compose` invocation. If PostgreSQL was
+started the same way, its exports name a different spec and env file — set
+these in a separate shell, or keep passing the flags explicitly.
 
 If the host still uses the legacy Compose v1 binary, replace `docker compose`
 with `docker-compose`.
@@ -99,9 +134,10 @@ that network is already created.
 If PostgreSQL is customer-managed and that network does not exist yet, either:
 
 - create it once with `docker network create autonox-local`
-- or set `METABASE_DOCKER_NETWORK` in `.env` to an existing network name
+- or set `METABASE_DOCKER_NETWORK` in `$AUTONOX_HOME/metabase.env` to an
+  existing network name
 
-## Step 4: verify
+### Step 4: verify
 
 ```bash
 docker compose ps
@@ -112,10 +148,23 @@ Then open:
 
 - [http://localhost:3000](http://localhost:3000)
 
-## Step 5 (optional): apply Terraform configuration
+### Step 5 (optional): apply Terraform configuration
 
 After Metabase is reachable, configure data sources, cards, and dashboards
 declaratively from [`../tf/`](../tf/). See [`../tf/README.md`](../tf/README.md).
+
+## Stop or remove
+
+These also interpolate the spec, so they need the same env file (or the
+`COMPOSE_FILE` / `COMPOSE_ENV_FILES` exports from step 3):
+
+```bash
+docker compose down
+```
+
+That does not remove `$AUTONOX_HOME/metabase.env` — your configuration survives
+teardown and repo upgrades alike. Metabase itself is stateless here; its
+metadata lives in the PostgreSQL database from step 1.
 
 ## Notes
 

@@ -1,3 +1,7 @@
+# TEMPLATE — copy this folder out of the vendor repository before editing it.
+# Your overlay belongs in your own Git repository, or under $AUTONOX_HOME if
+# there is none. Anything left here is replaced wholesale on the next AutoNox
+# upgrade. See ../../README.md, "How to deploy (customer workflow)".
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -5,7 +9,12 @@ kind: Kustomization
 namespace: autonox
 
 resources:
+  # Vendor reference — resolves only inside this repo. After copying out,
+  # replace it with a pinned Git ref or a vendored path:
+  #   github.com/autonox-ai/deploy//metabase/kustomize/overlays/openshift?ref=<vendor-version>
   - ../../overlays/openshift
+  # Rename to secret.metabase-db.yaml when you fill it in, or drop this line
+  # and have your secret manager create the metabase-db Secret.
   - secret.metabase-db.example.yaml
 
 # Example: pin a specific Metabase image version (overrides the base component)

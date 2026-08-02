@@ -5,6 +5,13 @@ terraform {
       version = "~> 0.1"
     }
   }
+
+  # Declared with an empty body so the state path is supplied at init time:
+  #   terraform init -backend-config="path=$AUTONOX_HOME/var/tf/metabase/terraform.tfstate"
+  # State holds the Metabase admin and bireader passwords in cleartext, so it
+  # must not land in this repository. Replace with a remote backend where the
+  # customer has one. See README.md.
+  backend "local" {}
 }
 
 # Variable declarations live in variables.tf.

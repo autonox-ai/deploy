@@ -71,6 +71,12 @@ metabase/
    provision data sources, cards, and dashboards on top of the running
    Metabase.
 
+Customer config for steps 2 and 4 lives in `$AUTONOX_HOME` (default
+`/etc/autonox`), never in this repository: `metabase.env` for Compose,
+`metabase.tfvars` plus Terraform state under `var/tf/metabase/` for Terraform.
+Kubernetes overlays go in the customer's own Git repository — see each
+subfolder's README.
+
 ## Connectivity assumption
 
 The Terraform module connects to the AutoNox warehouse over PostgreSQL. The

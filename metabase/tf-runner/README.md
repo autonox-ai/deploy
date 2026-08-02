@@ -44,24 +44,38 @@ for the AutoNox workload images.)
 
 ## Run
 
-Mount your `terraform.tfvars` (gitignored — see
-[`../tf/terraform.tfvars.example`](../tf/terraform.tfvars.example) for the
-shape) and pick a Terraform subcommand:
+Mount your variables file from `$AUTONOX_HOME` — the same
+`$AUTONOX_HOME/metabase.tfvars` the host-side flow uses (see
+[`../tf/README.md`](../tf/README.md); shape in
+[`../tf/terraform.tfvars.example`](../tf/terraform.tfvars.example)) — and pick a
+Terraform subcommand. Mounting it at `/work/tf/terraform.tfvars` is what makes
+Terraform auto-load it, so no `-var-file` is needed:
 
 ```bash
-# Plan
+export AUTONOX_HOME="${AUTONOX_HOME:-/etc/autonox}"
+```
+
+Plan:
+
+```bash
 docker run --rm --network=host \
-  -v $(pwd)/terraform.tfvars:/work/tf/terraform.tfvars:ro \
+  -v "$AUTONOX_HOME/metabase.tfvars:/work/tf/terraform.tfvars:ro" \
   ghcr.io/autonox-ai/metabase-terraform plan
+```
 
-# Apply (default CMD)
+Apply (the default `CMD`):
+
+```bash
 docker run --rm --network=host \
-  -v $(pwd)/terraform.tfvars:/work/tf/terraform.tfvars:ro \
+  -v "$AUTONOX_HOME/metabase.tfvars:/work/tf/terraform.tfvars:ro" \
   ghcr.io/autonox-ai/metabase-terraform
+```
 
-# Destroy (be careful)
+Destroy — be careful:
+
+```bash
 docker run --rm --network=host \
-  -v $(pwd)/terraform.tfvars:/work/tf/terraform.tfvars:ro \
+  -v "$AUTONOX_HOME/metabase.tfvars:/work/tf/terraform.tfvars:ro" \
   ghcr.io/autonox-ai/metabase-terraform destroy -auto-approve
 ```
 
@@ -71,14 +85,20 @@ as Metabase and target the in-cluster `metabase` service via `metabase_host`.
 
 ## Persisting state
 
-The image does not persist `terraform.tfstate`. Mount a host directory at
-`/work/tf` (alongside `terraform.tfvars`) if you need state across runs:
+The image does not persist `terraform.tfstate`. Mount a host directory for it
+if you need state across runs — `$AUTONOX_HOME/var/tf/metabase` is where the
+host-side flow keeps it, so the two agree:
 
 ```bash
+mkdir -p "$AUTONOX_HOME/var/tf/metabase"
 docker run --rm --network=host \
-  -v $(pwd)/state:/work/tf/state \
-  -v $(pwd)/terraform.tfvars:/work/tf/terraform.tfvars:ro \
+  -v "$AUTONOX_HOME/var/tf/metabase:/work/tf/state" \
+  -v "$AUTONOX_HOME/metabase.tfvars:/work/tf/terraform.tfvars:ro" \
   ghcr.io/autonox-ai/metabase-terraform apply -state=/work/tf/state/terraform.tfstate -auto-approve
 ```
 
-For real deployments, configure a remote backend in `tf/main.tf` instead.
+State holds the Metabase admin and `bireader` passwords in cleartext — keep it
+out of this repository and back it up as a secret.
+
+For real deployments, replace the `backend "local" {}` block in `tf/main.tf`
+with the customer's remote backend.
