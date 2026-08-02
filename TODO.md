@@ -1,7 +1,9 @@
 # TODO
 
 Findings from a full deployment rehearsal (PostgreSQL → migrations → import →
-assert) against the mock-hr scenario. Grouped by who has to fix them.
+assert) against the mock-hr scenario, plus the structural review of the repo.
+Grouped by who has to fix them. Strike through and annotate when done rather
+than deleting — the reasoning is worth more than the checkbox.
 
 ## Product — needs a change in the images, not here
 
@@ -56,12 +58,14 @@ Three gaps behind it, all admitted in `import-orchestration.md:162`:
   hand-editing a receipt to remove the failed entry — editing what is supposed
   to be immutable audit evidence. There should be a first-class
   "retry this task" path, gated on the operator having inspected state.
-- **A rewound resume corrupts the receipt sequence.** Resuming from an older
-  receipt restarts `receipt_sequence` there and overwrites the receipts above
-  it, so `latest` can point at a *worse* state than a higher-numbered receipt
-  still on disk. `workloads/import/README.md:22` tells operators to use "the
-  latest receipt there for safe inspection or recovery", which is then wrong.
-  Either refuse to rewind, or write forward without reusing sequence numbers.
+  **Half-landed and currently a bug:** `import.sh`'s usage block documents
+  `retry-task --receipt … --task … --acknowledge …` and describes it archiving
+  the failed attempt, but no such case exists in the command dispatch. The verb
+  is advertised and unimplemented — either finish it or remove it from usage.
+- ~~**A rewound resume corrupts the receipt sequence.**~~ **Done.**
+  `publish_receipt` now takes `max(sequence, highest_sequence_on_disk + 1)`, so
+  numbers are never reused and `latest` cannot regress below evidence still on
+  disk.
 - **No supported Silver lock inspection or release.** `warehouse silver` has
   only `run` and `finalize`. Lock state is visible solely by reading
   `warehouse.silver_workspace_locks` directly, and expiry (a liveness escape
@@ -184,6 +188,23 @@ Item **6** is the same skew seen from the warehouse side.
 >
 > Once the contracts are versioned, where the orchestrator lives is a
 > preference, not a correctness question.
+
+### 3d. Nothing pins the `postgres/bootstrap` ↔ Warehouse schema contract
+
+`postgres/bootstrap/setup.sql:56-61` and `ws_setup.sql.tmpl` create the schema
+set and grants that `workloads/warehouse`'s `migrate`, `canonical migrate` and
+`install-access-layer` assume already exist. A Warehouse release needing a new
+schema requires `setup.sql` to be updated in lockstep, and no version check
+enforces it — the failure surfaces as a permission or missing-relation error
+during migration rather than as a version mismatch.
+
+Item **1** is one instance of exactly this: reconciliation needs a schema the
+bootstrap does not grant, and the fix was a manual `GRANT` bolted onto the
+runbook.
+
+**Ask:** a schema-version assertion the image checks at migrate time, or at
+minimum a compatibility statement stating which bootstrap revision a given
+image release requires.
 
 ## This repo
 
@@ -308,6 +329,15 @@ Accept one breaking rename now. Operators who want shared values can layer
 files themselves — `set -a; source common.env; source warehouse.env; set +a`
 works today and needs no support from this repo.
 
+**Watch, not yet actionable — the size of the env surface.** Import needs 36
+variables plus nine `*_CONTAINER_ENV_NAMES` / `*_VOLUMES` / `*_RUN_ARGS`
+entries, and each new component adds another triplet. Collapsing this into an
+import profile was decided against deliberately
+(`import-orchestration.md:84,189`), and `run-import.sh` addressed the real pain
+— composition and leakage between sources — without it. Nothing to do now. If
+it does bite, the seam is schema validation over the composed environment, not
+a return to the profile.
+
 ### 7. `container_name: nox-pg18` is daemon-global
 
 `postgres/compose/compose.yaml:5` pins it, so `TESTKIT_COMPOSE_PROJECT` cannot
@@ -326,6 +356,17 @@ Drop the pin and resolve the container through Compose (`run.sh` already does).
 - `images/manifest.txt` — `autonox-warehouse` is pinned to latest `main`; that
   package has no release channel, only branch tags, unlike `collectors` and
   `reconciliation` which carry `enterprise`. Confirm that is intended.
+- `workloads/import/import.sh:153` — the `find`-based manifest fallback
+  contradicts `import-orchestration.md`'s "never search a filesystem for a
+  manifest". Prefer fixing the collector contract to always emit `manifest.uri`
+  so the fallback can go.
+- `workloads/import/README.md` — document the bash ≥ 4.3 requirement.
+  `read_nul_array` uses a nameref (`local -n`, `import.sh:86`), which macOS
+  stock bash 3.2 does not have.
+- **Dedupe the example wiring YAML.** `workloads/warehouse/examples/config/`
+  (`workspace_id: prod`) and `testkit/templates/config/` (`hello`) differ in two
+  lines. Pick one canonical copy and point the other at it. Sequence this after
+  **6b**, which deletes a field from both and from a third copy.
 
 ### 9. Defaults that write inside this repo
 
