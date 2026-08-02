@@ -9,30 +9,57 @@ reasoning still constrains something open — a rejected alternative, a mitigati
 waiting on an upstream fix, a correction that would otherwise be re-derived
 wrong. Once nothing depends on it, delete it; git history holds the rest.
 
+## Index
+
+Priority is against **shipping this repo to a real customer**, not against
+engineering taste. `P0` = do it before go-live. `P1` = soon after, or before the
+second customer. `P2` = maintainability; nothing breaks if it waits.
+
+| # | Item | Owner | Pri | Why that priority |
+| --- | --- | --- | --- | --- |
+| [1](#1-reconciliation-creates-publicschema_migrations--closed-here) | Reconciliation creates `public.schema_migrations` | ~~here~~ / upstream [rec#14](https://github.com/autonox-ai/reconciliation/issues/14) | **done** | Fixed by setting `migrations_schema` in the reconcile wiring; the `public` grant is gone from `testkit/run.sh` and was never needed. #14 remains open for the structural half (DDL in the runtime path) but blocks nothing. |
+| [1b](#1b-no-supported-silver-lock-inspection-or-release) | No Silver lock inspection or release | upstream [wh#37](https://github.com/autonox-ai/warehouse/issues/37) | P2 | A stuck lock costs 7200s of failed imports, but `import.sh retry-task` covers the operator path. |
+| [2](#2-postgres-collector-emits-json-columns-as-strings) | Collector emits JSON columns as strings | upstream | P2 | Workaround (scalar columns, mapped one by one) is documented and proven in mock-hr. |
+| [3](#3-banding-silently-no-ops-on-an-unmatched-source-name) | Banding silently no-ops on unmatched source | upstream | **P0** | Silent wrong data: row counts stay green while every attribute is null. Compounds with **10** — the smoke test cannot catch it. Go-live must assert a non-null attribute on the customer's real specs. |
+| [3b](#3b-the-runtime-wiring-requires-workspace_id-which-is-not-a-wiring-concern) | Wiring requires `workspace_id` | upstream | P2 | Mitigated by **6b**; the guard holds. |
+| [3c](#3c-cli-json-output-is-unversioned-so-the-orchestrator-hedges) | CLI JSON output is unversioned | upstream | P1 | Latent while digests are pinned. Becomes a live wrong-data risk the moment `manifest.txt` is bumped — until then, the constraint is: never bump without re-running the testkit. |
+| [3d](#3d-nothing-pins-the-postgresbootstrap--warehouse-schema-contract) | Bootstrap ↔ Warehouse schema contract unpinned | upstream | P2 | Same class as **1**; surfaces as a loud migration failure, not silent corruption. |
+| [6b](#6b-the-warehouse-workload-names-the-workspace-twice--mitigated-not-solved) | Workspace named twice — mitigated | here, blocked on 3b | P2 | Guard is in place and correct. The six cleanup steps are dead-weight removal. |
+| [6c](#6c-one-concept-several-names-across-the-env-files) | One concept, several names across env files | here | P2 | Operator ergonomics. Costs one breaking rename, so do it between customers, not before one. |
+| [7](#7-container_name-nox-pg18-is-daemon-global) | `container_name: nox-pg18` is daemon-global | here | P1 | Observed blocking a run, not theoretical: `run.sh e2e` under project `autonox-testkit` failed with `Conflict. The container name "/nox-pg18" is already in use`, and its `reset` could not drop `autonox-pgdata` because the other project held it. Testing a change against a live instance requires tearing that instance down first. |
+| [8](#8-smaller) | Smaller | here | P2 — **except** the `manifest.txt` channel question, which is **P0** | `autonox-warehouse` is pinned to a `main` build with no release channel while `collectors` and `reconciliation` carry `enterprise`. Ship that knowingly or not at all. |
+| [9](#9-defaults-that-write-inside-this-repo) | `provider-mirror/` written inside the repo | here | P1 | Tracked *and* gitignored, arm64 zip missing. Regeneration drifts silently — matters as soon as the air-gap bundle ships. |
+| [10](#10-mock-hr-is-a-smoke-test-not-a-fixture) | mock-hr is a smoke test, not a fixture | here | P1 | A green testkit run proves less than it appears to. See **3** for the specific thing it fails to catch. |
+
 ## Product — needs a change in the images, not here
 
-### 1. Reconciliation creates `public.schema_migrations`
+### 1. Reconciliation creates `public.schema_migrations` — closed here
 
-Filed upstream as
-[autonox-ai/reconciliation#14](https://github.com/autonox-ai/reconciliation/issues/14),
-which carries the full diagnosis and the agreed fix: add `reconcile migrate`,
-move the DDL out of `PostgresReconciliationStore.__init__` so the runtime path
-fails closed instead of migrating, and store `schema_migrations` in the
-control-plane schema.
+**Resolved in this repo without waiting for upstream.** `migrations_schema` is
+already a supported wiring field (`wiring.spec.v1.schema.json:149`, validated at
+`config.py:161-184`); only its *default* is wrong — absent, it resolves to
+`"public"` (`runtime_context.py:334-337`), independently of
+`control_plane_store.schema`. Setting it explicitly in
+`testkit/scenarios/mock-hr/config/reconcile.yaml` puts the ledger in
+`reconciliation`, which `setup.sql:76` already grants to `noxop` and
+`setup.sql:141-148` already covers with default privileges for `noxreader`.
 
-`noxop` needs permanent `CREATE` on `public` until it ships, or every import
-dies:
+The `GRANT USAGE, CREATE ON SCHEMA public TO noxop` workaround is deleted from
+`testkit/run.sh`. Verified on a clean `e2e mock-hr` bootstrap: import green
+end to end, `has_schema_privilege('noxop','public','CREATE')` = `false`, zero
+tables in `public`, and `schema_migrations` present only in `reconciliation`
+and `warehouse`.
 
-```
-psycopg.errors.InsufficientPrivilege: permission denied for schema public
-LINE 2: CREATE TABLE IF NOT EXISTS "public".schema_migrations...
-```
+Keep this note until
+[reconciliation#14](https://github.com/autonox-ai/reconciliation/issues/14)
+ships — it explains why every reconcile wiring must carry `migrations_schema`,
+which is otherwise an unexplained line that looks redundant beside `schema`.
 
-Worked around by `testkit/run.sh:161-165` and step 3 of the rehearsal runbook.
-
-**When #14 ships, in this repo:** drop that grant from both places, and add a
-third workload under `workloads/` for `reconcile migrate` so the deploy sequence
-is symmetric with `warehouse`.
+**Still upstream, not blocking:** DDL runs inside
+`PostgresReconciliationStore.__init__`, so every process migrates — including
+read-only `reconcile get`/`list`/`validate` — and `noxop` holds `CREATE` on
+`reconciliation` at runtime rather than DML only. That is what `reconcile
+migrate` fixes, and it is when `workloads/` gains a third workload.
 
 ### 1b. No supported Silver lock inspection or release
 
@@ -296,6 +323,16 @@ a return to the profile.
 `postgres/compose/compose.yaml:5` pins it, so `TESTKIT_COMPOSE_PROJECT` cannot
 give two stacks side by side and the testkit collides with a running instance.
 Drop the pin and resolve the container through Compose (`run.sh` already does).
+
+Observed while verifying item 1: `run.sh e2e` under project `autonox-testkit`
+died on `Conflict. The container name "/nox-pg18" is already in use`, after its
+`reset` had already failed to remove `autonox-pgdata` ("Resource is still in
+use") because the `autonox-postgres` project still held it. The only way
+forward was `compose down -v` on the other stack — so verifying any change
+costs the running instance. The `nox-pg18` network alias
+(`compose.yaml:29-31`) already gives peers a stable hostname, so dropping the
+pin does not change how containers reach the database; it only changes the
+`docker exec nox-pg18` lines in the READMEs.
 
 ### 8. Smaller
 

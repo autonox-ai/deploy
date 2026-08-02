@@ -9,6 +9,10 @@ control_plane_store:
     provider: env
     ref: RECONCILE_POSTGRES_DSN
   schema: reconciliation
+  # Without this the migrations ledger defaults to public.schema_migrations,
+  # which noxop cannot create (PG15 revoked CREATE on public from PUBLIC).
+  # Keeps the ledger with the tables it tracks. See reconciliation#14.
+  migrations_schema: reconciliation
 secrets_providers:
   env:
     kind: env
