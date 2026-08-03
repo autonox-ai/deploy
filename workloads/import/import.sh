@@ -112,7 +112,7 @@ validate_runtime_list() {
 }
 
 validate_inputs() {
-  require_command jq; require_command "$CONTAINER_RUNTIME"; require_command mktemp; require_command od
+  require_command jq; require_command "$CONTAINER_RUNTIME"; require_command mktemp; require_command od; require_command python3
   for image in "$COLLECTOR_IMAGE" "$WAREHOUSE_IMAGE" "$RECONCILE_IMAGE"; do
     is_digest_image "$image" || die "image must be pinned by digest: $image"
   done
@@ -284,8 +284,24 @@ run_task() {
     record_event "$task" failed "$result" "$log" 0 "stdout must be one JSON object"
     die "$task emitted non-JSON or mixed stdout"
   }
-  jq --arg task "$task" --arg start "$start" --arg end "$end" --argjson command "$command_json" \
-    '.tasks[$task] += {started_at:$start, ended_at:$end, command:$command}' "$STATE_FILE" >"${STATE_FILE}.tmp"
+  local command_tmp
+  command_tmp="$(mktemp)"
+  printf '%s' "$command_json" >"$command_tmp"
+  python3 - "$STATE_FILE" "$task" "$start" "$end" "$command_tmp" <<'PYEOF'
+import json, sys
+state_file, task, start, end, command_file = sys.argv[1:6]
+with open(state_file) as f:
+    state = json.load(f)
+with open(command_file) as f:
+    command = json.load(f)
+tasks = state.setdefault("tasks", {})
+entry = tasks.get(task, {})
+entry.update({"started_at": start, "ended_at": end, "command": command})
+tasks[task] = entry
+with open(state_file + ".tmp", "w") as f:
+    json.dump(state, f)
+PYEOF
+  rm -f "$command_tmp"
   mv "${STATE_FILE}.tmp" "$STATE_FILE"
   TASK_RESULT="$result"; TASK_LOG="$log"
 }
@@ -368,7 +384,7 @@ silver_stage() {
   local host; host="$(uri_to_host_path "$intents_uri")"; [[ -f "$host" ]] || die "Silver intent JSONL is unavailable through ARTIFACT_HOST_ROOT"
   count="$(awk 'END { print NR + 0 }' "$host")"; hash="$(sha256_file "$host")"
   assert_json "$TASK_RESULT" --argjson count "$count" '(.mapper_handoff.intents_emitted | tonumber) == $count' "Silver reported an intent count different from frozen JSONL"
-  state_update '.silver += {result:$result, status:"intents_emitted", lock_owner:$run, intents:{uri:$uri,sha256:$hash,count:$count}}' --arg result "$TASK_RESULT" --arg run "$silver_run" --arg uri "$intents_uri" --arg hash "$hash" --argjson count "$count"
+  state_update '.silver = ((.silver // {}) + {result:$result, status:"intents_emitted", lock_owner:$run, intents:{uri:$uri,sha256:$hash,count:$count}})' --arg result "$TASK_RESULT" --arg run "$silver_run" --arg uri "$intents_uri" --arg hash "$hash" --argjson count "$count"
   record_event silver succeeded "$TASK_RESULT" "$TASK_LOG" 0 "intents frozen and lock retained"
 }
 
@@ -380,7 +396,7 @@ reconcile_stage() {
   [[ "$(awk 'END { print NR + 0 }' "$host")" == "$count" ]] || die "frozen intent file count changed; refusing reconciliation"
   intents_path="$(uri_to_container_path RECONCILE "$intents_uri")"; group="$(jq -r '.reconciliation.execution_group' "$STATE_FILE")"
   if (( count == 0 )); then
-    state_update '.reconciliation += {validation:{status:"noop",processed:0}, run:{status:"noop",processed:0,errors:0}}'
+    state_update '.reconciliation = ((.reconciliation // {}) + {validation:{status:"noop",processed:0}, run:{status:"noop",processed:0,errors:0}})'
     record_event reconcile_validate succeeded "" "" 0 "explicit zero-intent no-op"
     record_event reconcile_run succeeded "" "" 0 "explicit zero-intent no-op"
     publish_receipt >/dev/null; return
@@ -436,7 +452,7 @@ approve_retry() {
   actor="${OPERATOR_ID:-$(id -un 2>/dev/null || printf 'unknown')}"
   now="$(date -u +%FT%TZ)"
   state_update '
-      .tasks[$task] |= (. + {status: "retry_approved", history: ((.history // []) + [del(.history)])})
+      .tasks[$task] = ((.tasks[$task] // {}) + {status: "retry_approved", history: ((.tasks[$task].history // []) + [(.tasks[$task] | del(.history))])})
     | .operator_actions = ((.operator_actions // []) + [{action: "retry_task", task: $task, cleared_status: $status, reason: $reason, actor: $actor, at: $now}])' \
     --arg task "$task" --arg status "$status" --arg reason "$reason" --arg actor "$actor" --arg now "$now"
   publish_receipt >/dev/null
