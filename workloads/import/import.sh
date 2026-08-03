@@ -4,6 +4,11 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
+# fd 3: the real stderr, captured before any task redirects fd 2 into a
+# per-attempt log file. DEBUG_CONTAINER_COMMANDS writes here so it reaches
+# the operator live instead of silently landing in stderr.log.
+exec 3>&2
+
 SCRIPT_NAME="${0##*/}"
 RECEIPT_SCHEMA_VERSION=1
 STATE_FILE=""
@@ -247,6 +252,11 @@ run_container() {
   for value in "${envs[@]}"; do command+=(--env "$value"); done
   for value in "${vols[@]}"; do command+=(--volume "$value"); done
   command+=("$image" "${command_args[@]}" "$@")
+  if [[ -n "${DEBUG_CONTAINER_COMMANDS:-}" ]]; then
+    printf 'DEBUG %s command:' "$tool" >&3
+    printf ' %q' "${command[@]}" >&3
+    printf '\n' >&3
+  fi
   "${command[@]}"
 }
 
