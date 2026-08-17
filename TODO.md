@@ -30,6 +30,7 @@ second customer. `P2` = maintainability; nothing breaks if it waits.
 | [8](#8-smaller) | Smaller | here | P2 — **except** the `manifest.txt` channel question, which is **P0** | `autonox-warehouse` is pinned to a `main` build with no release channel while `collectors` and `reconciliation` carry `enterprise`. Ship that knowingly or not at all. |
 | [9](#9-defaults-that-write-inside-this-repo) | `provider-mirror/` written inside the repo | here | P1 | Tracked *and* gitignored, arm64 zip missing. Regeneration drifts silently — matters as soon as the air-gap bundle ships. |
 | [10](#10-mock-hr-is-a-smoke-test-not-a-fixture) | mock-hr is a smoke test, not a fixture | here | P1 | A green testkit run proves less than it appears to. See **3** for the specific thing it fails to catch. |
+| [11](#11-warehouse-config-vs-config--inconsistent-host-directory-convention) | `warehouse-config/` vs `config/` — inconsistent host directory convention | here | P2 | Operator ergonomics, same class as **6c**. Surfaced onboarding a real customer: nothing breaks, but the split is unexplained without reading both workloads' source. |
 
 ## Product — needs a change in the images, not here
 
@@ -385,3 +386,31 @@ identity — nor orphaned accounts, entitlements, or most of `bi_views`. A secon
 source with accounts correlated on `employee_id` would cover the parts that
 matter, and the scenario contract makes that a new directory, not a harness
 change.
+
+### 11. `warehouse-config/` vs `config/` — inconsistent host directory convention
+
+`workloads/warehouse/run.sh` mounts `WAREHOUSE_CONFIG_DIR` wholesale into the
+container at a fixed path, `/config` (`run.sh:108`), and the CLI inside
+defaults to `/config/warehouse-wiring.yaml` and
+`/config/warehouse-canonical-wiring.yaml` (`run.sh:81-82`). That host
+directory therefore has to be dedicated — nothing else can live in it, because
+the whole thing gets mounted as `/config`. Hence `warehouse-config/`.
+
+`workloads/import` has no equivalent mechanism. `RECONCILE_WIRING`,
+`COLLECTOR_SPEC`, `FLOW_SPEC`, `BANDING_SPEC` and `CONNECTION_CATALOG` are
+just host file paths named individually in `*_CONTAINER_VOLUMES` — `import.sh`
+doesn't care what directory they live in. `.env.example` picks
+`/etc/autonox/config/` as a shared home for all of them and mounts it at the
+*same* path inside the container (not `/config`), but that is a documentation
+convention, not something the code enforces.
+
+Result: two directories with overlapping-sounding names (`warehouse-config`,
+`config`) where one is a hard mount contract and the other is an arbitrary
+example choice — indistinguishable to an operator without reading both
+workloads' source, as happened onboarding a real customer. Doesn't block
+anything; costs an explanation every time someone new sets up a deployment.
+
+**Ask:** either document the distinction prominently (top-level README's
+folder map, or each workload's README) or rename `config/` to something that
+doesn't rhyme with `warehouse-config/` — e.g. `import-config/` — so the two
+read as unrelated rather than as an inconsistent pair.

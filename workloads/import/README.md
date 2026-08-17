@@ -106,6 +106,11 @@ unaffected, and schedulers capture the progress in their logs. Pass
 
 ## When a step fails
 
+For a step-by-step procedure to hand to an integrator or helpdesk engineer —
+locating the receipt, reading the attempt evidence, and finding the collector's
+own report — see [Troubleshooting a failed import](TROUBLESHOOTING.md). The rest
+of this section is the reasoning behind it.
+
 The driver reports only which task failed — for example `silver failed; see
 <RECEIPT_DIR>/<orchestration_run_id>/latest`. The tool's actual error is not in
 that receipt; it is in the attempt log:
@@ -157,4 +162,6 @@ or release a held lock, so a run that cannot be finalized waits out the 7200s
 expiry.
 
 See [Import orchestration](import-orchestration.md) for the lifecycle,
-failure handling, recovery rules, and scheduler integration requirements.
+failure handling, recovery rules, and scheduler integration requirements, and
+[Troubleshooting a failed import](TROUBLESHOOTING.md) for the operator-facing
+diagnostic procedure.
