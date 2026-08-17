@@ -23,7 +23,7 @@ customer's situation.
 ```
 deploy/
 ├── postgres/    # PostgreSQL — bootstrap SQL + compose + kustomize (3 modes)
-├── metabase/    # OPTIONAL self-hosted BI — compose + kustomize + Terraform + air-gap runner
+├── metabase/    # OPTIONAL self-hosted BI — compose (behind Traefik/TLS) + kustomize + Terraform + air-gap runner
 ├── images/      # Workload (batch CLI) image transfer — JFrog or air-gap
 ├── workloads/   # Invocation scripts for the AutoNox batch CLI dockers
 └── testkit/     # Harness for rehearsing a deployment end-to-end before doing it for real

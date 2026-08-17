@@ -9,7 +9,7 @@ platform.
 ```
 metabase/
 ├── bootstrap/      # SQL: create Metabase DB + role on the AutoNox PG instance
-├── compose/        # Run Metabase as a Docker container (single host)
+├── compose/        # Run Metabase as a Docker container behind Traefik/TLS (single host)
 ├── kustomize/      # Run Metabase on Kubernetes
 ├── tf/             # Terraform: data sources, cards, dashboards
 └── tf-runner/      # Air-gapped Terraform docker image (provider pre-mirrored)
@@ -64,16 +64,21 @@ metabase/
 2. **Run the Metabase service** — pick one:
    - [`compose/`](compose/) for single-host Docker
    - [`kustomize/`](kustomize/) for Kubernetes
-3. **Complete first-time login** — open `http://<host>:3000` and create the
-   admin account; capture the credentials for Terraform.
+3. **Complete first-time login** — open `https://<host>/` and create the admin
+   account; capture the credentials for Terraform. On the Compose path, TLS is
+   always on: Traefik terminates HTTPS on `:443` with a self-signed certificate
+   generated on first start, replaceable with one from the customer's CA — see
+   [`compose/README.md`](compose/README.md#tls). On Kubernetes, TLS is the
+   cluster Ingress's job.
 4. **Apply declarative configuration** — from [`tf/`](tf/) (or via the
    air-gapped [`tf-runner/`](tf-runner/) image), `terraform init && apply` to
    provision data sources, cards, and dashboards on top of the running
    Metabase.
 
 Customer config for steps 2 and 4 lives in `$AUTONOX_HOME` (default
-`/etc/autonox`), never in this repository: `metabase.env` for Compose,
-`metabase.tfvars` plus Terraform state under `var/tf/metabase/` for Terraform.
+`/etc/autonox`), never in this repository: `metabase.env` and the TLS pair in
+`certs/` for Compose, `metabase.tfvars` plus Terraform state under
+`var/tf/metabase/` for Terraform.
 Kubernetes overlays go in the customer's own Git repository — see each
 subfolder's README.
 

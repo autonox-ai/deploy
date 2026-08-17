@@ -28,4 +28,7 @@ ghcr.io/autonox-ai/reconciliation:sha-4626b4c-enterprise
 #   - metabase/kustomize/components/images/kustomization.yaml
 pgvector/pgvector:0.8.5-pg18-trixie
 metabase/metabase:v0.58.22
+# TLS terminator in front of Metabase. Only needed with metabase/compose/ —
+# the Kubernetes path terminates TLS at the cluster Ingress instead.
+traefik:v3.7.9
 hashicorp/terraform:1.9.8

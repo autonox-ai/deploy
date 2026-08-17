@@ -1,0 +1,35 @@
+# Traefik dynamic configuration: the one route this stack serves.
+#
+# Written by hand instead of discovered from container labels — the stack has a
+# single backend, and this keeps the Docker socket out of the Traefik container
+# (see the comment on the traefik service in compose.yaml).
+
+http:
+  routers:
+    metabase:
+      # Deliberately hostname-free: it matches whatever name or IP the customer
+      # browses to, so nothing here has to be configured per site. The hostname
+      # only matters for the certificate (METABASE_HOSTNAME), not for routing.
+      rule: "PathPrefix(`/`)"
+      # HTTPS only. The `web` entrypoint never reaches a router: it is
+      # configured to redirect everything to `websecure`.
+      entryPoints:
+        - websecure
+      service: metabase
+      # Empty on purpose: it enables TLS with the default certificate from
+      # tls.yml. (An ACME setup would name a certResolver here instead.)
+      tls: {}
+
+  services:
+    metabase:
+      loadBalancer:
+        # "metabase" is the network alias of the container on autonox-local.
+        # Proxy -> Metabase stays plaintext on that internal network, which is
+        # the right default while Metabase publishes no reachable port of its
+        # own.
+        servers:
+          - url: "http://metabase:3000"
+        # Metabase builds some absolute URLs from the request Host; forwarding
+        # it keeps them on the name the client actually used. Traefik adds the
+        # X-Forwarded-* headers on top.
+        passHostHeader: true

@@ -1,6 +1,16 @@
 name: autonox-metabase
 
+# Metabase is never exposed directly: Traefik terminates TLS on :443 and is the
+# only published entrypoint. TLS is always on — there is no plaintext mode and
+# no overlay to enable. On first `up`, metabase-certs issues a self-signed
+# certificate if the customer has not supplied one, so a stock run needs no
+# certificate work at all. See README.md ("TLS") for supplying real ones.
+
 services:
+  # ---------------------------------------------------------------------------
+  # metabase
+  # ---------------------------------------------------------------------------
+
   metabase:
     container_name: nox-metabase
     image: ${METABASE_IMAGE:-metabase/metabase:v0.58.22}
@@ -12,12 +22,169 @@ services:
       MB_DB_USER: ${MB_DB_USER:-metabase_user}
       MB_DB_PASS: "${MB_DB_PASS:?Set the metabase_user password in AUTONOX_HOME/metabase.env and pass it with --env-file (see metabase/compose/README.md)}"
       MB_DB_HOST: ${MB_DB_HOST:-postgres}
+      # The public URL Metabase writes into emails, password-reset links, and
+      # public/embedded links. Behind a proxy it cannot infer this, and a wrong
+      # value only shows up later in mail nobody can click. Set MB_SITE_URL
+      # explicitly whenever METABASE_HTTPS_PORT is not 443 — the port has to be
+      # part of the URL and cannot be derived here.
+      MB_SITE_URL: ${MB_SITE_URL:-https://${METABASE_HOSTNAME:-localhost}}
     ports:
-      - "${METABASE_PORT:-3000}:3000"
+      # Loopback only. The customer-facing entrypoint is Traefik on :443; this
+      # publish exists so host-side tooling (terraform from ../tf, curl, the
+      # tf-runner image with --network=host) can reach Metabase over plain HTTP
+      # without dealing with the certificate. Set METABASE_BIND_ADDRESS=0.0.0.0
+      # to go back to a directly reachable port — not recommended, it bypasses
+      # TLS.
+      - "${METABASE_BIND_ADDRESS:-127.0.0.1}:${METABASE_PORT:-3000}:3000"
     networks:
       autonox-local:
         aliases:
           - metabase
+
+  # ---------------------------------------------------------------------------
+  # tls
+  # ---------------------------------------------------------------------------
+
+  # Runs once per `up`, then exits. Makes sure the certificate directory —
+  # $AUTONOX_HOME/certs, or METABASE_TLS_DIR if you point it elsewhere — holds a
+  # usable tls.crt/tls.key pair before Traefik starts:
+  #
+  #   - customer-supplied pair present -> left untouched, forever
+  #   - nothing there                  -> issues a self-signed pair for
+  #                                       METABASE_HOSTNAME (825 days)
+  #   - its own pair expiring in <30d  -> reissues it
+  #
+  # "Its own" is decided by fingerprint (/certs/.self-signed), not by the mere
+  # presence of a marker file: dropping a customer certificate on top of a
+  # generated one changes the fingerprint, so this job then treats the pair as
+  # supplied and never overwrites it.
+  #
+  # It runs the Metabase image purely because that image already ships openssl,
+  # which keeps the air-gap manifest one image shorter.
+  metabase-certs:
+    container_name: nox-metabase-certs
+    image: ${METABASE_IMAGE:-metabase/metabase:v0.58.22}
+    restart: "no"
+    # The Metabase image runs as uid 2000; the bind-mounted certificate
+    # directory is created root-owned by the container engine on first run.
+    user: "0:0"
+    environment:
+      METABASE_HOSTNAME: ${METABASE_HOSTNAME:-localhost}
+      # Extra SANs for hosts reachable under more than one name, comma
+      # separated, openssl syntax: "DNS:bi.corp.example,IP:10.0.0.7".
+      METABASE_TLS_SANS: ${METABASE_TLS_SANS:-}
+    volumes:
+      - ${METABASE_TLS_DIR:-${AUTONOX_HOME:-/etc/autonox}/certs}:/certs
+    # Writes files and talks to nobody.
+    network_mode: none
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        host="$${METABASE_HOSTNAME:-localhost}"
+        fingerprint() { openssl x509 -in "$$1" -noout -fingerprint -sha256; }
+
+        if [ -s /certs/tls.crt ] && [ -s /certs/tls.key ]; then
+          ours=no
+          if [ -f /certs/.self-signed ] && \
+             [ "$$(cat /certs/.self-signed)" = "$$(fingerprint /certs/tls.crt)" ]; then
+            ours=yes
+          fi
+          if [ "$$ours" = no ]; then
+            echo "tls: serving the certificate supplied in the certificate directory"
+            openssl x509 -in /certs/tls.crt -noout -subject -issuer -enddate
+            exit 0
+          fi
+          if openssl x509 -in /certs/tls.crt -noout -checkend 2592000 >/dev/null; then
+            echo "tls: reusing the self-signed certificate for '$$host'"
+            openssl x509 -in /certs/tls.crt -noout -subject -enddate
+            exit 0
+          fi
+          echo "tls: the self-signed certificate expires within 30 days, reissuing"
+        fi
+
+        # A bare IPv4 literal has to go in as IP:, not DNS:, or no client
+        # matches it. Anything containing a non-digit/non-dot is a name.
+        case "$$host" in
+          *[!0-9.]*) san="DNS:$$host" ;;
+          *)         san="IP:$$host" ;;
+        esac
+        # localhost/127.0.0.1 are always included so host-side checks
+        # (curl https://localhost) validate without extra configuration --
+        # unless the hostname already is one of them, since a repeated SAN
+        # entry is just noise in every certificate dump from here on.
+        if [ "$$host" != localhost ]; then san="$$san,DNS:localhost"; fi
+        if [ "$$host" != 127.0.0.1 ]; then san="$$san,IP:127.0.0.1"; fi
+        if [ -n "$${METABASE_TLS_SANS:-}" ]; then
+          san="$$san,$${METABASE_TLS_SANS}"
+        fi
+
+        echo "tls: issuing a self-signed certificate for '$$host' ($$san)"
+        # 825 days: the longest validity clients still accept for a manually
+        # trusted certificate. Browsers will warn until someone trusts it — a
+        # certificate from the customer's own CA is the fix, not a longer one.
+        openssl req -x509 -newkey rsa:2048 -sha256 -days 825 -nodes \
+          -subj "/CN=$$host" \
+          -addext "subjectAltName=$$san" \
+          -addext "basicConstraints=critical,CA:FALSE" \
+          -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+          -addext "extendedKeyUsage=serverAuth" \
+          -keyout /certs/tls.key.new -out /certs/tls.crt.new 2>/dev/null
+        chmod 600 /certs/tls.key.new
+        chmod 644 /certs/tls.crt.new
+        mv /certs/tls.key.new /certs/tls.key
+        mv /certs/tls.crt.new /certs/tls.crt
+        fingerprint /certs/tls.crt > /certs/.self-signed
+        echo "tls: wrote tls.crt and tls.key to the certificate directory"
+
+  traefik:
+    container_name: nox-traefik
+    image: ${TRAEFIK_IMAGE:-traefik:v3.7.9}
+    restart: unless-stopped
+    depends_on:
+      metabase-certs:
+        condition: service_completed_successfully
+    # No Docker socket is mounted. Routing is one static file (traefik/dynamic)
+    # rather than container labels: this stack proxies exactly one service, and
+    # a socket-less proxy is one less privileged mount to justify to the
+    # customer's security review — and one less difference between Docker and
+    # Podman hosts.
+    command:
+      - --entryPoints.web.address=:80
+      - --entryPoints.websecure.address=:443
+      # :80 exists only to bounce clients to HTTPS.
+      #
+      # The target is named as an entrypoint, so Traefik takes the port from
+      # that entrypoint's address (:443) and, being the scheme default, leaves
+      # it out of the Location header. When Traefik is published on some other
+      # HTTPS port the redirect would then point at a port nothing listens on,
+      # so METABASE_HTTPS_REDIRECT_TO can name the published port directly
+      # instead — ":8443".
+      - --entryPoints.web.http.redirections.entryPoint.to=${METABASE_HTTPS_REDIRECT_TO:-websecure}
+      - --entryPoints.web.http.redirections.entryPoint.scheme=https
+      # Certificates are dynamic configuration and cannot be passed as flags.
+      # watch=true watches this DIRECTORY, not the certificate files it points
+      # at — see "Renewing" in README.md.
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --ping=true
+      - --log.level=${TRAEFIK_LOG_LEVEL:-INFO}
+      - --accesslog=true
+    ports:
+      - "${METABASE_HTTP_PORT:-80}:80"
+      - "${METABASE_HTTPS_PORT:-443}:443"
+    volumes:
+      - ${METABASE_TLS_DIR:-${AUTONOX_HOME:-/etc/autonox}/certs}:/certs:ro
+      # Read-only mount of a vendor file: the repository is never written to.
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - autonox-local
 
 networks:
   autonox-local:

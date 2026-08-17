@@ -1,0 +1,27 @@
+# Traefik dynamic configuration: the certificate served on :443.
+#
+# Only paths live here — no certificate material is ever in this repository.
+# The pair is whatever ends up in METABASE_TLS_DIR (default /etc/autonox/certs):
+# either the customer's own certificate or the self-signed one the
+# metabase-certs service issues on first start. See compose/README.md ("TLS").
+#
+# The file provider watches THIS directory, not the certificate files it points
+# at. Replacing tls.crt/tls.key on their own reloads nothing and Traefik keeps
+# serving the old certificate until this file is touched (or Traefik is
+# restarted) — see "Renewing" in compose/README.md.
+
+tls:
+  stores:
+    default:
+      # One host, one certificate: this is served for every SNI, so the stack
+      # answers on whatever name or IP the customer reaches it by. Serving a
+      # different certificate per hostname would instead be a tls.certificates
+      # list, each entry matched by the names inside it.
+      defaultCertificate:
+        # Must be the FULL CHAIN — leaf first, then any intermediates the CA
+        # issued. A leaf-only file is the classic trap: it validates in a
+        # browser that already cached the intermediate and fails everywhere
+        # else (curl, mobile, a colleague's laptop). If the CA sent the
+        # intermediates as a separate file, concatenate them after the leaf.
+        certFile: /certs/tls.crt
+        keyFile: /certs/tls.key
